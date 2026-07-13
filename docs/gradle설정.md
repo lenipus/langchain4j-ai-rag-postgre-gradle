@@ -171,41 +171,27 @@ org.gradle.java.installations.paths=D:/PROJ_KOSII/java/jdk-21.0.11+10
 
 `.gitignore`에 `bin/`을 추가해뒀다 (`build/`처럼 원래 있었어야 하는데 빠져 있었음).
 
-## 8. Boot Dashboard 미사용 결정 — classpath 혼입 문제
+## 8. Boot Dashboard 실행 시 Mockito ClassNotFoundException — 해결됨
 
 VSCode Spring Boot Dashboard로 앱을 Run/Debug하면 `.vscode/launch.json`의 `"type": "java"` 설정을 타고 **`bin/`을 classpath로 직접 실행**한다 (Gradle을 거치지 않음, `gradlew bootRun`을 대신 호출해주는 게 아님).
 
-이 프로젝트에서 Boot Dashboard로 실행 시 아래 에러가 발생하는 것을 확인했다.
+이 프로젝트에서 Boot Dashboard로 실행 시 아래 에러가 발생했었다.
 
 ```
 Caused by: java.lang.ClassNotFoundException: org.mockito.Mockito
 ```
 
-**원인**: 실행에 사용된 classpath에 `bin/main`뿐 아니라 **`bin/test`까지 섞여 들어감**. 그 결과 테스트 헬퍼 클래스(`EgovHybridRetrieverToggleTest$TestBeans`)의 `@Bean embeddingStore()`(Mockito로 가짜 객체를 만드는 테스트 전용 빈)가 컴포넌트 스캔에 걸려서, 운영 설정(`EgovLangChain4jConfig`)의 진짜 `embeddingStore` bean을 덮어써버림. Mockito는 `testImplementation` 스코프라 실제 실행 classpath엔 없어서 `ClassNotFoundException` 발생.
+**방아쇠(trigger)**: 실행에 사용된 classpath에 `bin/main`뿐 아니라 `bin/test`까지 섞여 들어감.
 
-**시도한 해결책과 결과**:
-- "Java: Clean Java Language Server Workspace" 후 재시작 → 효과 없음 (단순 캐시 문제가 아니라 Buildship이 이 프로젝트의 classpath를 main/test 구분 없이 구성하는 구조적 문제로 판단)
-- `./gradlew bootRun` → **정상 동작 확인** (Gradle은 `main` 소스셋만 정확히 골라서 실행하므로 문제가 발생하지 않음)
+**근본 원인**: `EgovHybridRetrieverToggleTest.java`의 내부 클래스 `TestBeans`가 `@Configuration`으로 선언되어 있었다. 원래는 `ApplicationContextRunner`로 테스트 안에서만 수동으로 등록해서 쓰려는 목(mock) 빈 모음인데, `@Configuration`은 일반 컴포넌트 스캔 대상이라 classpath에 노출되면(bin/test 혼입) 그대로 스캔에 걸린다. 그 결과 `embeddingStore()`(Mockito mock 반환)가 운영 설정(`EgovLangChain4jConfig`)의 진짜 `embeddingStore` bean을 덮어썼고, Mockito는 `testImplementation` 스코프라 실제 실행 classpath엔 없어서 `ClassNotFoundException` 발생.
 
-**결정: Boot Dashboard 대신 `./gradlew bootRun`을 기본 실행 방법으로 사용한다.**
+**정석 해결책**: `@Configuration` → `@TestConfiguration`으로 변경 (적용 완료, `EgovHybridRetrieverToggleTest.java:54`).
 
-나중에 브레이크포인트 디버깅이 필요해지면, Gradle이 직접 앱을 켜고 VSCode는 그 프로세스에 attach만 하는 방식으로 우회 가능하다 (classpath 계산을 Gradle에 맡기므로 이 문제를 원천적으로 피함).
+`@TestConfiguration`은 `@TestComponent`를 메타 애노테이션으로 가지고 있고, Spring Boot의 메인 컴포넌트 스캔이 `@TestComponent` 붙은 클래스를 **처음부터 스캔 대상에서 제외**하도록 설계되어 있다. 즉 classpath에 bin/test가 섞여 들어가는 근본 문제(Buildship/VSCode의 classpath 구성 방식)는 그대로 남아있지만, 애노테이션을 올바르게 쓰면 그 문제가 실제 장애로 이어지지 않는다. 반대로 순수 `@Configuration`으로 된 테스트 전용 설정 클래스가 있다면 언제든 같은 문제가 재발할 수 있으므로, **테스트에서만 쓰는 `@Configuration`은 항상 `@TestConfiguration`으로 선언할 것.**
 
-```powershell
-.\gradlew.bat bootRun --debug-jvm
-```
+이제 Boot Dashboard로 정상 실행 가능하며, `gradlew bootRun`으로 전환할 필요는 없다.
 
-그리고 `launch.json`에 아래 attach 설정을 추가해서 연결한다.
-
-```json
-{
-  "type": "java",
-  "name": "Attach to bootRun",
-  "request": "attach",
-  "hostName": "localhost",
-  "port": 5005
-}
-```
+(참고: 만약 이후에도 유사한 문제가 재발하면, Gradle이 직접 앱을 켜고 VSCode는 attach만 하는 방식으로 우회 가능하다. `./gradlew bootRun --debug-jvm` + `launch.json`에 `"request": "attach", "port": 5005` 설정 추가.)
 
 ## 9. `gradlew` 실행 관련 트러블슈팅 (PowerShell)
 

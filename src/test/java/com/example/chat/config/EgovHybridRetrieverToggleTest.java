@@ -7,8 +7,8 @@ import dev.langchain4j.store.embedding.EmbeddingStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -51,7 +51,7 @@ class EgovHybridRetrieverToggleTest {
         });
     }
 
-    @Configuration
+    @TestConfiguration
     static class TestBeans {
         @Bean
         @SuppressWarnings("unchecked")
