@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        // 사내 Nexus 우선 (Maven의 settings.xml mirrorOf=*와 동일한 저장소).
+        // 플러그인(id 'org.springframework.boot' 등)은 build.gradle의 repositories가 아니라
+        // 이 pluginManagement.repositories에서 해석되므로 별도로 지정해야 한다.
+        maven {
+            url 'http://kosiidvlp.iptime.org:11081/nexus/content/groups/public/'
+            allowInsecureProtocol = true
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'langchain4j-ai-rag-postgre'

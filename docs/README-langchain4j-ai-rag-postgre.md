@@ -1,0 +1,435 @@
+# LangChain4j와 PostgreSQL(PGVector)을 사용한 RAG(Retrieval-Augmented Generation) 샘플
+
+## 환경 설정
+
+### 표준프레임워크 실행환경 5.0 (Boot 적용)
+
+| 항목 | 버전 |
+| :--- | :--- |
+| JDK | 17 |
+| Jakarta EE | 10 |
+| Servlet | 6.0 |
+| Spring Framework | 6.2.11 |
+| Spring Boot | 3.5.6 |
+| LangChain4j | 1.8.0 |
+
+### 개발 및 빌드 도구
+
+| 항목 | 버전 |
+| :--- | :--- |
+| Maven | 3.9.9 |
+| Docker | 28.0.4 |
+
+### 외부 서비스
+
+| 항목 | 버전 | 비고 |
+| :--- | :--- | :--- |
+| Ollama | 0.17.1 이상 | LLM 모델 서빙 |
+| PostgreSQL (PGVector) | 17 | Docker 이미지: `pgvector/pgvector:pg17` |
+
+- Ollama 0.17.1 이전 버전에는 GGUF 모델 처리 과정에서 메모리 내 정보가 노출될 수 있는 취약점(CVE-2026-7482)이 존재하므로, 0.17.1 이상 버전 사용을 권장한다.
+
+## 사용 기술
+
+1. Java 17
+2. Spring Boot 3.5.6 (Maven)
+3. LangChain4j 1.8.0 (AiServices 패턴)
+4. PostgreSQL + PGVector
+5. Ollama
+6. ONNX Runtime (로컬 임베딩)
+
+## 라이선스 주의사항
+
+- 해당 프로젝트에서 사용하는 기술 스택의 라이선스 현황은 다음과 같다.
+
+| 기술 스택 | 라이선스 | 상용 사용 가능 여부 | 비고 |
+| :------- | :------ | :----------------- | :--- |
+| **LangChain4j** | Apache 2.0 | 가능 | 제약 없음 |
+| **Spring Boot** | Apache 2.0 | 가능 | 제약 없음 |
+| **Ollama** | MIT | 가능 | 제약 없음 (단, 사용 모델의 라이선스는 별도 확인 필요) |
+| **PostgreSQL** | PostgreSQL License | 가능 | MIT/BSD 유사 라이선스, 제약 없음 |
+| **PGVector** | PostgreSQL License | 가능 | 제약 없음 |
+| **ONNX Runtime** | MIT | 가능 | 제약 없음 |
+
+### 주의사항
+
+- **Ollama**는 MIT 라이선스이지만, 사용하는 **LLM 모델의 라이선스는 별도로 확인**하여야 한다.
+- **PostgreSQL**과 **PGVector**는 모두 PostgreSQL License 하에 배포되며, 상용 사용에 제약이 없다.
+
+### 참고 링크
+
+- [LangChain4j 라이선스](https://github.com/langchain4j/langchain4j/blob/main/LICENSE)
+- [PostgreSQL 라이선스](https://www.postgresql.org/about/licence/)
+- [Ollama 라이선스](https://github.com/ollama/ollama/blob/main/LICENSE)
+
+## 사전 준비
+
+1. [Ollama](https://ollama.com/download) 설치 및 사용할 LLM 모델을 설치한다. Ollama 설치 및 ONNX 모델 익스포트 방법은 [루트 README](./README.md)의 `공통 사전 준비`, `폐쇄망에서의 Ollama`, `Onnx 모델 익스포트` 항목을 참고한다.
+
+```bash
+ollama pull qwen3-4b:Q4_K_M
+ollama list
+```
+
+2. 임베딩 모델 파일(`model.onnx`, `tokenizer.json`)은 `${user.home}/EgovSearch-Config/Config/model` 디렉토리에 위치시켜야 한다.
+
+3. `docker-compose.yml`을 사용해 `docker compose up -d`로 docker container 기반의 PostgreSQL 설정을 해 둔다.
+
+4. 외부 설정 파일을 준비한다. 임베딩 모델과 토크나이저의 경로를 `searchConfig.json`에 설정한다.
+
+```
+위치: ${user.home}/EgovSearch-Config/Config/searchConfig.json
+```
+
+```json
+{
+  "modelPath": "${HOME}/EgovSearch-Config/Config/model/model.onnx",
+  "tokenizerPath": "${HOME}/EgovSearch-Config/Config/model/tokenizer.json"
+}
+```
+
+## 아키텍처
+
+해당 프로젝트는 LangChain4j의 **AiServices 패턴**을 사용하여 선언적이고 간결한 RAG 시스템을 구현한다.
+
+### 주요 컴포넌트
+
+#### 1. AiServices 인터페이스
+
+```java
+// RagChatbot.java - RAG 기반 챗봇
+public interface RagChatbot {
+    @SystemMessage("당신은 지식 기반 질의응답 시스템입니다...")
+    Flux<String> streamChat(@UserMessage String query);  // langchain4j-reactor
+}
+
+// SimpleChatbot.java - 일반 챗봇 (RAG 없음)
+public interface SimpleChatbot {
+    @SystemMessage("당신은 도움이 되는 AI 어시스턴트입니다...")
+    Flux<String> streamChat(@UserMessage String query);  // langchain4j-reactor
+}
+```
+
+#### 2. ChatbotFactory (동적 모델 선택 + ChatMemory 통합)
+
+```java
+public RagChatbot createRagChatbot(String modelName, String sessionId) {
+    return AiServices.builder(RagChatbot.class)
+        .streamingChatModel(streamingModel)
+        .contentRetriever(contentRetriever)    // 자동 RAG 검색
+        .chatMemory(createChatMemory(sessionId)) // 자동 히스토리 관리
+        .build();
+}
+```
+
+#### 3. PersistentChatMemoryStore (PostgreSQL 기반 채팅 메모리)
+
+```java
+@Component
+public class PersistentChatMemoryStore implements ChatMemoryStore {
+    // ChatMemoryStore 인터페이스 구현
+    // PostgreSQL에 채팅 히스토리 자동 저장/조회
+}
+```
+
+#### 4. ContentRetriever (RAG 자동 통합)
+
+```java
+@Bean
+public ContentRetriever contentRetriever(...) {
+    return EmbeddingStoreContentRetriever.builder()
+        .embeddingStore(embeddingStore)
+        .embeddingModel(embeddingModel)
+        .maxResults(topK)
+        .minScore(similarityThreshold)
+        .build();
+}
+```
+
+### 데이터 흐름
+
+```
+사용자 질문
+    │
+    ▼
+┌──────────────────┐
+│ ContentRetriever │ → PGVector 벡터 검색
+│  (자동 RAG)      │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│   RagChatbot     │ → Ollama LLM 호출
+│  (AiServices)    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  ChatMemory      │ → PostgreSQL 저장
+│ (자동 저장)      │
+└────────┬─────────┘
+         │
+         ▼
+Flux<String> 스트리밍 응답
+```
+
+## 문서 인덱싱
+
+- 현재 인덱싱 가능한 문서의 종류는 마크다운(`.md`), PDF(`.pdf`), DOCX(`.docx`), HWP(`.hwp`), HWPX(`.hwpx`) 파일이다.
+- `application.yml`의 문서 경로 관련 속성(`document.path`, `document.pdf-path`, `document.docx-path`, `document.hwp-path`, `document.hwpx-path`)에서 경로를 지정한다.
+- DOCX/HWP/HWPX 인덱싱은 경로 기반으로만 지원된다. 각 경로 속성이 설정되지 않은 경우 해당 처리는 건너뛰며 앱 기동에는 영향이 없다.
+  - DOCX 활성화 예시: `document.docx-path: file:C:/workspace-test/upload/data/**/*.docx`
+  - HWP 활성화 예시: `document.hwp-path: file:C:/workspace-test/upload/data/**/*.hwp`
+  - HWPX 활성화 예시: `document.hwpx-path: file:C:/workspace-test/upload/data/**/*.hwpx`
+- 파일 업로드(웹 UI)는 마크다운(.md) 파일만 지원한다. PDF, DOCX, HWP, HWPX는 서버 측 경로에 파일을 직접 배치한 뒤 재인덱싱으로 처리한다.
+- 알려진 제약: HWPX 파일에서 글머리기호·번호 매기기 단락의 텍스트는 추출에서 제외된다(hwpxlib insertParaHead=false 설정으로 NPE 회피).
+
+## 실행
+
+1. 애플리케이션을 실행하면 도큐먼트 생성 및 임베딩, 적재가 실행된다. 수동으로 실행하려면 메인 화면의 `문서 재인덱싱` 버튼을 클릭한다.
+2. `문서 업로드` 버튼으로 Markdown(.md) 파일을 업로드할 수 있다. PDF, HWP, HWPX 파일은 `application.yml`의 각 경로 속성(`document.pdf-path`, `document.hwp-path`, `document.hwpx-path`)에 지정한 서버 경로에 직접 배치한 뒤 재인덱싱한다.
+3. 메인 화면의 `RAG 채팅 모드`, `일반 채팅 모드` 버튼으로 RAG가 적용된 질의 답변, 일반적인 질의 답변을 받을 수 있다.
+4. 기본 접속 주소: `http://localhost:8080`
+
+## API 명세
+
+### 세션 관리 API
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | `/api/sessions` | 새 세션 생성 |
+| GET | `/api/sessions` | 전체 세션 목록 |
+| GET | `/api/sessions/{sessionId}/messages` | 세션 메시지 조회 |
+| PUT | `/api/sessions/{sessionId}/title` | 세션 제목 변경 |
+| DELETE | `/api/sessions/{sessionId}` | 세션 삭제 |
+
+### 채팅 API
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/chat/stream/rag` | RAG 기반 스트리밍 채팅 |
+| GET | `/api/chat/stream/simple` | 일반 스트리밍 채팅 |
+
+**파라미터:**
+- `query`: 사용자 질문
+- `model`: 모델명 (선택, 기본값: application.yml 설정)
+- `sessionId`: 세션 ID (헤더)
+
+### 문서 관리 API
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| POST | `/api/documents/reindex` | 문서 재인덱싱 |
+| GET | `/api/documents/status` | 인덱싱 상태 조회 |
+
+### 모델 관리 API
+
+| Method | Endpoint | 설명 |
+|--------|----------|------|
+| GET | `/api/ollama/models` | Ollama 모델 목록 |
+
+## 프로젝트 구조
+
+```
+langchain4j-ai-rag-postgre/
+├── src/main/java/com/example/chat/
+│   ├── config/                      # 설정 클래스
+│   │   ├── EgovAsyncConfig.java     # 비동기 설정
+│   │   ├── EgovEmbeddingConfig.java # 임베딩 설정
+│   │   ├── EgovLangChain4jConfig.java # LLM, 임베딩, 벡터스토어 설정
+│   │   ├── EgovRagConfig.java       # ContentRetriever 설정
+│   │   ├── EgovCommonConfig.java    # 공통 설정
+│   │   └── etl/                     # 문서 ETL 파이프라인
+│   │       ├── readers/
+│   │       │   ├── EgovMarkdownReader.java   # 마크다운 문서 리더
+│   │       │   ├── EgovPdfReader.java        # PDF 문서 리더
+│   │       │   ├── EgovDocxReader.java       # DOCX 문서 리더
+│   │       │   ├── EgovHwpReader.java        # HWP 문서 리더
+│   │       │   └── EgovHwpxReader.java       # HWPX 문서 리더
+│   │       ├── transformers/
+│   │       │   ├── EgovContentFormatTransformer.java   # 콘텐츠 포맷 변환
+│   │       │   └── EgovEnhancedDocumentTransformer.java # 문서 변환
+│   │       └── writers/
+│   │           └── EgovVectorStoreWriter.java # 벡터스토어 저장
+│   │
+│   ├── service/                     # 서비스 계층
+│   │   ├── RagChatbot.java          # RAG 챗봇 인터페이스 (AiServices)
+│   │   ├── SimpleChatbot.java       # 일반 챗봇 인터페이스 (AiServices)
+│   │   ├── ChatbotFactory.java      # 챗봇 팩토리 (동적 모델 + 메모리)
+│   │   ├── EgovChatService.java     # 채팅 서비스 인터페이스
+│   │   ├── EgovChatSessionService.java # 세션 서비스 인터페이스
+│   │   ├── EgovDocumentService.java # 문서 서비스 인터페이스
+│   │   ├── EgovOllamaModelService.java # Ollama 모델 서비스 인터페이스
+│   │   └── impl/
+│   │       ├── EgovChatServiceImpl.java
+│   │       ├── EgovChatSessionServiceImpl.java
+│   │       ├── EgovDocumentServiceImpl.java
+│   │       └── EgovOllamaModelServiceImpl.java
+│   │
+│   ├── repository/                  # 데이터 접근 계층
+│   │   ├── ChatMemoryRepository.java        # JPA Repository
+│   │   ├── DocumentHashRepository.java      # 문서 해시 Repository
+│   │   ├── ChatSessionRepository.java       # 세션 Repository
+│   │   └── PersistentChatMemoryStore.java   # ChatMemoryStore 구현
+│   │
+│   ├── entity/                      # JPA 엔티티
+│   │   ├── ChatMemoryEntity.java    # 채팅 메모리 엔티티
+│   │   ├── ChatSessionEntity.java   # 세션 엔티티
+│   │   └── DocumentHashEntity.java  # 문서 해시 엔티티
+│   │
+│   ├── controller/                  # REST 컨트롤러
+│   │   ├── EgovChatController.java      # 채팅 API
+│   │   ├── EgovChatSessionController.java # 세션 API
+│   │   ├── EgovDocumentController.java  # 문서 API
+│   │   ├── EgovOllamaModelController.java # Ollama 모델 API
+│   │   ├── EgovPromptTestController.java  # 프롬프트 테스트 API
+│   │   └── EgovWebController.java        # 웹 페이지
+│   │
+│   ├── context/                     # 세션 컨텍스트
+│   │   └── SessionContext.java      # ThreadLocal 세션 관리
+│   │
+│   ├── dto/                         # DTO
+│   ├── response/                    # API 응답 DTO
+│   └── util/                        # 유틸리티
+│
+├── src/main/resources/
+│   ├── application.yml              # 애플리케이션 설정
+│   └── templates/
+│       └── chat.html                # 채팅 UI
+│
+├── pom.xml                          # Maven 설정
+└── docker-compose.yml               # PostgreSQL Docker 설정
+```
+
+## 설정 가이드
+
+### application.yml 주요 설정
+
+```yaml
+# LangChain4j Ollama 설정
+langchain4j:
+  ollama:
+    base-url: http://localhost:11434
+    chat-model:
+      model-name: qwen3-4b:Q4_K_M
+      temperature: 0.4
+      timeout: 60s
+
+# RAG 설정
+rag:
+  similarity:
+    threshold: 0.20               # 유사도 임계값
+  top-k: 3                        # 검색 결과 개수
+
+# 채팅 메모리 설정
+chat:
+  memory:
+    max-messages: 20              # 최대 메시지 수
+
+# PGVector 설정
+pgvector:
+  host: localhost
+  port: 5432
+  database: ragdb
+  username: postgres
+  password: postgres
+  table-name: document_embeddings
+  dimension: 768
+  create-table: true
+```
+
+### 하이브리드 검색 (dense 벡터 + lexical pg_trgm)
+
+의미 기반 dense 벡터 검색에 키워드 기반 lexical 검색(PostgreSQL `pg_trgm` 트라이그램 유사도)을
+더해 [RRF(Reciprocal Rank Fusion)](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)로
+융합한다. 정확한 용어·고유명사 질의에서 dense 채널이 놓치는 문서를 lexical 채널이 보완한다.
+기본값은 **off**이며, 켜면 dense 단일 검색은 그대로 두고 lexical 채널과 융합만 추가된다.
+
+```yaml
+rag:
+  retrieval:
+    hybrid:
+      enabled: true                 # 하이브리드 활성화 (기본 false)
+      weight:
+        dense: 1.0                  # dense 채널 RRF 가중치
+        lexical: 1.0                # lexical 채널 RRF 가중치
+      top-k: 3                          # 융합 결과 개수 (미설정 시 rag.top-k)
+      lexical:
+        word-similarity-threshold: 0.30 # lexical(pg_trgm word_similarity) 게이트
+```
+
+활성화 시 애플리케이션 기동 완료 시점에 `pg_trgm` 확장과 GIN 트라이그램 인덱스를 멱등으로
+생성한다(`EgovHybridIndexInitializer`). `docker-compose`의 `init-scripts/01-init-pgvector.sql`이
+컨테이너 초기화 때 `CREATE EXTENSION pg_trgm`을 미리 수행하므로, 애플리케이션 계정에 슈퍼유저
+권한을 부여할 필요가 없다.
+
+#### lexical 연산자와 임계값: `word_similarity`(`%>`) + 0.30
+
+lexical 채널은 대칭 `similarity`(`%`)가 아니라 **`word_similarity`(`%>`)** 를 사용한다.
+이 앱은 문서를 큰 청크(기본 4000자, `DocumentSplitters.recursive`)로 색인하는데, 대칭
+`similarity`는 문서가 길수록 트라이그램 Jaccard 분모가 커져 값이 붕괴한다. 실제 표준프레임워크
+한국어 문서(runtime README)를 색인한 코퍼스에서 정답 청크의 `similarity`는 **0.006~0.058**
+(전부 0.06 미만)로, 어떤 실용 임계값을 써도 관련 문서가 `%`를 통과하지 못했다.
+
+`word_similarity`는 질의를 문서의 **가장 잘 맞는 연속 구간**과 비교하므로 청크 길이에 강건하다.
+같은 코퍼스에서 정답 청크의 `word_similarity`는 **0.17~1.0**로 분포했고, `%>` 게이트 임계값별
+recall@3(topK=3)은 다음과 같았다.
+
+| word_similarity 임계값 | recall@3 | 비고 |
+|------------------------|----------|------|
+| 0.60 (pg_trgm 기본)    | 0.31     | 너무 엄격 |
+| 0.40                   | 0.57     | |
+| **0.30**               | **0.80** | 기본값(권장) |
+| 0.20                   | 0.84     | recall↑, 노이즈↑ |
+
+`%>` 연산자는 `text` 컬럼의 GIN 트라이그램 인덱스를 그대로 사용한다(별도 인덱스 불필요).
+임계값은 **트랜잭션 스코프**(`set_config('pg_trgm.word_similarity_threshold', …, is_local => true)`)로만
+적용해 `%>`(GIN 인덱스) 경로를 유지하면서 커넥션 풀에 값이 누수되지 않도록 한다. 기본값은
+runtime README 코퍼스 측정 기준 **0.30**이며, recall을 더 원하면 낮추고(노이즈 증가) 정밀도를
+원하면 높인다. 위 수치는 구성한 라벨 질의셋(문서 33·질의 35) 기준의 결정론적 측정값으로,
+절대 수치보다 방향(대칭 `%`는 큰 청크에서 무력, `%>`가 적합)이 핵심이다.
+
+## 문제 해결
+
+### Ollama 연결 실패
+
+```bash
+# 연결 테스트
+curl http://localhost:11434/api/tags
+
+# Ollama 서비스 시작
+ollama serve  # Linux/macOS
+# Windows: Ollama 앱 실행
+```
+
+### PostgreSQL 연결 실패
+
+```bash
+# Docker 컨테이너 확인
+docker ps
+
+# 서비스 상태 확인
+sudo systemctl status postgresql  # Linux
+brew services list                 # macOS
+```
+
+### ONNX Runtime 초기화 실패
+
+- **윈도우**: [Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) 설치가 필요하다.
+- **리눅스**: `sudo apt-get install -y libgomp1` 명령으로 필요한 라이브러리를 설치한다.
+
+### 메모리 부족
+
+```bash
+# 힙 메모리 증가
+java -Xmx4g -jar target/langchain4j-ai-rag-postgre-1.0.0.jar
+```
+
+## 참고 자료
+
+- [LangChain4j 공식 문서](https://docs.langchain4j.dev/)
+- [LangChain4j AiServices](https://docs.langchain4j.dev/tutorials/ai-services)
+- [LangChain4j RAG](https://docs.langchain4j.dev/tutorials/rag)
+- [PGVector 문서](https://github.com/pgvector/pgvector)
+- [Ollama 문서](https://github.com/ollama/ollama)
+- [ONNX Runtime 문서](https://onnxruntime.ai/)

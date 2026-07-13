@@ -1,0 +1,16 @@
+{
+  "java.jdt.ls.java.home": "D:\\PROJ_KOSII\\java\\jdk-21.0.11+10",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-21",
+      "path": "D:\\PROJ_KOSII\\java\\jdk-21.0.11+10",
+      "default": true
+    },
+    {
+      "name": "JavaSE-17",
+      "path": "D:\\PROJ_KOSII\\java\\jdk-17.0.19+10"
+    }
+  ],
+  "java.compile.nullAnalysis.mode": "automatic",
+  "java.configuration.updateBuildConfiguration": "interactive"
+}

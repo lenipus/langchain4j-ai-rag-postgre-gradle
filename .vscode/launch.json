@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Langchain4jRagApplication",
+      "request": "launch",
+      "mainClass": "com.example.chat.Langchain4jRagApplication",
+      "projectName": "langchain4j-ai-rag-postgre",
+      "vmArgs": "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8"
+      /* application.yml 기본값과 동일해서 더 이상 필요 없음 (참고용으로만 남겨둠)
+      "env": {
+        "SERVER_PORT": "8081",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "35432",
+        "POSTGRES_USER": "tester",
+        "POSTGRES_PASSWORD": "test123#",
+        "EMBEDDING_MODEL_PATH": "/app/rag/onnx-uv/model", // 임베딩을 Ollama(embeddinggemma:300m)로 이전하면서 더 이상 사용 안 함
+        "DOCUMENT_UPLOAD_PATH": "/app/rag/upload",
+        "OLLAMA_BASE_URL": "http://localhost:31434"
+      }
+      */
+    }
+  ]
+}

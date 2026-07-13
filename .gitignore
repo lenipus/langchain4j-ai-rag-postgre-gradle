@@ -1,0 +1,22 @@
+# Maven build output
+target/
+
+# Gradle build output
+build/
+.gradle/
+
+# Eclipse/VSCode Java 언어서버 자체 컴파일 출력 (.classpath의 output 경로)
+bin/
+
+# 업로드된 문서(사용자 데이터) - 소스 코드가 아님
+upload/data/
+
+# OS/에디터 캐시
+*.log
+.DS_Store
+
+# Eclipse 프로젝트 메타데이터
+.project
+.classpath
+.settings/
+.factorypath
