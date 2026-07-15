@@ -49,6 +49,10 @@ configurations.configureEach {
 }
 
 dependencies {
+    // 개발 편의: 템플릿/정적 리소스 캐시 자동 비활성화 + 클래스 변경 시 빠른 재시작
+    // (템플릿/정적 리소스 변경은 재시작 없이 바로 반영됨). 배포용 jar에는 포함되지 않음.
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
     // LangChain4j Core

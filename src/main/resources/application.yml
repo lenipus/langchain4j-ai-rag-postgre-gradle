@@ -144,7 +144,7 @@ rag:
   retrieval:
     hybrid:
       # 활성화 여부. false(기본)이면 dense 단일 검색만 사용 (기존 동작 유지)
-      enabled: true
+      enabled: false
       # 채널 가중치
       weight:
         dense: 1.0
