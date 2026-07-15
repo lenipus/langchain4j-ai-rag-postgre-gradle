@@ -2,12 +2,17 @@ package com.example.chat.config;
 
 // import com.example.chat.util.ConfigUtils;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 // import dev.langchain4j.model.embedding.onnx.OnnxEmbeddingModel;
 // import dev.langchain4j.model.embedding.onnx.PoolingMode;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
 import lombok.RequiredArgsConstructor;
@@ -23,8 +28,9 @@ import java.time.Duration;
 
 /**
  * LangChain4j 설정 클래스
- * - Ollama 임베딩 모델 (원격 Ollama 서버, embeddinggemma:300m)
- * - Ollama 채팅 모델
+ * - 채팅 모델과 임베딩 모델을 각각 독립적으로 로컬/원격 전환 가능
+ *   - api-type이 ollama(기본값)면 로컬/원격 Ollama 네이티브 API 사용
+ *   - api-type이 openai면 OpenAI 호환 서버 사용 (base-url에 /v1 포함해서 설정)
  * - PGVector 임베딩 저장소
  */
 @Slf4j
@@ -35,24 +41,49 @@ public class EgovLangChain4jConfig /* implements InitializingBean */ {
     // private final ConfigUtils configUtils;
     private final DataSource dataSource;
 
-    // private String modelPath;
-    // private String tokenizerPath;
-    // private EmbeddingModel embeddingModel;
+    // ===== 채팅(LLM) 모델 설정 =====
 
-    @Value("${langchain4j.ollama.base-url}")
-    private String ollamaBaseUrl;
+    @Value("${langchain4j.ollama.chat-model.base-url}")
+    private String chatModelBaseUrl;
+
+    /** 인증이 필요할 때만 설정. api-type과는 별개 값 (있다고 무조건 openai는 아님) */
+    @Value("${langchain4j.ollama.chat-model.api-key:}")
+    private String chatModelApiKey;
+
+    /** ollama(네이티브, 기본값) | openai(OpenAI 호환) */
+    @Value("${langchain4j.ollama.chat-model.api-type:ollama}")
+    private String chatModelApiType;
 
     @Value("${langchain4j.ollama.chat-model.model-name}")
-    private String ollamaModelName;
+    private String chatModelName;
 
     @Value("${langchain4j.ollama.chat-model.temperature}")
-    private Double ollamaTemperature;
+    private Double chatModelTemperature;
 
     @Value("${langchain4j.ollama.chat-model.timeout:60s}")
-    private Duration ollamaTimeout;
+    private Duration chatModelTimeout;
+
+    /** 컨텍스트 윈도우(num_ctx). Ollama 네이티브(api-type=ollama)일 때만 적용, 0이면 Ollama 기본값 사용 */
+    @Value("${langchain4j.ollama.chat-model.num-ctx:0}")
+    private Integer chatModelNumCtx;
+
+    // ===== 임베딩 모델 설정 (채팅 모델과 완전히 독립) =====
+
+    @Value("${langchain4j.ollama.embedding-model.base-url:http://localhost:31434}")
+    private String embeddingModelBaseUrl;
+
+    /** 인증이 필요할 때만 설정. api-type과는 별개 값 (있다고 무조건 openai는 아님) */
+    @Value("${langchain4j.ollama.embedding-model.api-key:}")
+    private String embeddingModelApiKey;
+
+    /** ollama(네이티브, 기본값) | openai(OpenAI 호환) */
+    @Value("${langchain4j.ollama.embedding-model.api-type:ollama}")
+    private String embeddingModelApiType;
 
     @Value("${langchain4j.ollama.embedding-model.model-name:embeddinggemma:300m}")
-    private String ollamaEmbeddingModelName;
+    private String embeddingModelName;
+
+    // ===== PGVector 설정 =====
 
     @Value("${pgvector.table-name:document_embeddings}")
     private String pgvectorTableName;
@@ -185,52 +216,96 @@ public class EgovLangChain4jConfig /* implements InitializingBean */ {
     */
 
     /**
-     * Ollama 임베딩 모델 빈 (원격 Ollama 서버에서 임베딩 처리, embeddinggemma:300m)
+     * OpenAI 호환 빌더에 넘길 API 키. 인증이 필요 없는 서버라 비어있으면
+     * OpenAI 클라이언트가 요구하는 자리 채움 값("not-needed")으로 대체한다.
+     */
+    private static String resolveApiKey(String apiKey) {
+        return (apiKey == null || apiKey.isBlank()) ? "not-needed" : apiKey;
+    }
+
+    /**
+     * 임베딩 모델 빈.
+     * embedding-model.api-type이 openai면 OpenAI 호환 서버, 아니면(기본값 ollama) 로컬/원격 Ollama 네이티브를 사용한다.
      */
     @Bean
     public EmbeddingModel embeddingModel() {
-        // return this.embeddingModel;
-        log.info("Initializing Ollama Embedding Model...");
-        log.info("Base URL: {}", ollamaBaseUrl);
-        log.info("Embedding model name: {}", ollamaEmbeddingModelName);
+        boolean useOpenAi = "openai".equalsIgnoreCase(embeddingModelApiType);
+        log.info("Initializing Embedding Model... (apiType={})", embeddingModelApiType);
+        log.info("Base URL: {}", embeddingModelBaseUrl);
+        log.info("Embedding model name: {}", embeddingModelName);
 
+        if (useOpenAi) {
+            return OpenAiEmbeddingModel.builder()
+                    .baseUrl(embeddingModelBaseUrl)
+                    .apiKey(resolveApiKey(embeddingModelApiKey))
+                    .modelName(embeddingModelName)
+                    .build();
+        }
         return OllamaEmbeddingModel.builder()
-                .baseUrl(ollamaBaseUrl)
-                .modelName(ollamaEmbeddingModelName)
+                .baseUrl(embeddingModelBaseUrl)
+                .modelName(embeddingModelName)
                 .build();
     }
 
     /**
-     * Ollama 채팅 모델 빈 (비스트리밍)
+     * 채팅 모델 빈 (비스트리밍).
+     * api-type이 openai면 OpenAI 호환 서버, 아니면(기본값 ollama) Ollama 네이티브를 사용한다.
      */
     @Bean
-    public OllamaChatModel chatLanguageModel() {
-        log.info("Initializing Ollama Chat Model...");
-        log.info("Base URL: {}", ollamaBaseUrl);
-        log.info("Model name: {}", ollamaModelName);
-        log.info("Temperature: {}", ollamaTemperature);
+    public ChatModel chatLanguageModel() {
+        boolean useOpenAi = "openai".equalsIgnoreCase(chatModelApiType);
+        log.info("Initializing Chat Model... (apiType={})", chatModelApiType);
+        log.info("Base URL: {}", chatModelBaseUrl);
+        log.info("Model name: {}", chatModelName);
+        log.info("Temperature: {}", chatModelTemperature);
 
-        return OllamaChatModel.builder()
-                .baseUrl(ollamaBaseUrl)
-                .modelName(ollamaModelName)
-                .temperature(ollamaTemperature)
-                .timeout(ollamaTimeout)
-                .build();
+        if (useOpenAi) {
+            return OpenAiChatModel.builder()
+                    .baseUrl(chatModelBaseUrl)
+                    .apiKey(resolveApiKey(chatModelApiKey))
+                    .modelName(chatModelName)
+                    .temperature(chatModelTemperature)
+                    .timeout(chatModelTimeout)
+                    .build();
+        }
+        var builder = OllamaChatModel.builder()
+                .baseUrl(chatModelBaseUrl)
+                .modelName(chatModelName)
+                .temperature(chatModelTemperature)
+                .timeout(chatModelTimeout);
+        if (chatModelNumCtx != null && chatModelNumCtx > 0) {
+            builder.numCtx(chatModelNumCtx);
+        }
+        return builder.build();
     }
 
     /**
-     * Ollama 스트리밍 채팅 모델 빈
+     * 스트리밍 채팅 모델 빈.
+     * api-type이 openai면 OpenAI 호환 서버, 아니면(기본값 ollama) Ollama 네이티브를 사용한다.
      */
     @Bean
-    public OllamaStreamingChatModel streamingChatLanguageModel() {
-        log.info("Initializing Ollama Streaming Chat Model...");
+    public StreamingChatModel streamingChatLanguageModel() {
+        boolean useOpenAi = "openai".equalsIgnoreCase(chatModelApiType);
+        log.info("Initializing Streaming Chat Model... (apiType={})", chatModelApiType);
 
-        return OllamaStreamingChatModel.builder()
-                .baseUrl(ollamaBaseUrl)
-                .modelName(ollamaModelName)
-                .temperature(ollamaTemperature)
-                .timeout(ollamaTimeout)
-                .build();
+        if (useOpenAi) {
+            return OpenAiStreamingChatModel.builder()
+                    .baseUrl(chatModelBaseUrl)
+                    .apiKey(resolveApiKey(chatModelApiKey))
+                    .modelName(chatModelName)
+                    .temperature(chatModelTemperature)
+                    .timeout(chatModelTimeout)
+                    .build();
+        }
+        var builder = OllamaStreamingChatModel.builder()
+                .baseUrl(chatModelBaseUrl)
+                .modelName(chatModelName)
+                .temperature(chatModelTemperature)
+                .timeout(chatModelTimeout);
+        if (chatModelNumCtx != null && chatModelNumCtx > 0) {
+            builder.numCtx(chatModelNumCtx);
+        }
+        return builder.build();
     }
 
     /**

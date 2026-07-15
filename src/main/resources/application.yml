@@ -54,26 +54,29 @@ spring:
 #       : APP_EMBEDDING_CONFIG_PATH 환경 변수로 이 값을 주입하던 k8s 설정/문서.
 
 # LangChain4j Ollama 설정
+# 채팅(LLM)과 임베딩은 서로 완전히 독립적으로 로컬/원격 전환 가능.
+# api-type이 실제 API 규격을 결정한다: ollama(네이티브, 기본값) | openai(OpenAI 호환, base-url에 /v1 포함해서 설정)
 langchain4j:
   ollama:
-    base-url: ${OLLAMA_BASE_URL:http://localhost:31434}
+    # ===== 채팅(LLM) =====
     chat-model:
-      model-name: HyperCLOVA-3b:Q4_K_MM
+      base-url: ${OLLAMA_CHAT_BASE_URL:http://localhost:31434}
+      api-key: ${OLLAMA_CHAT_API_KEY:}
+      api-type: ${OLLAMA_CHAT_API_TYPE:ollama}
+      model-name: ${OLLAMA_CHAT_MODEL_NAME:}
       temperature: 0.4
       timeout: 60s
-    # 임베딩 모델 (ONNX 로컬 파일 대신 원격 Ollama 서버에서 처리)
+      # 컨텍스트 윈도우(num_ctx). Ollama 네이티브(api-type=ollama)일 때만 적용, 0이면 Ollama 기본값 사용
+      num-ctx: ${OLLAMA_CHAT_NUM_CTX:0}
+    # ===== 임베딩 (채팅과 별개 서버 지정 가능, 기본은 로컬) =====
     embedding-model:
-      model-name: embeddinggemma:300m
+      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
+      api-key: ${OLLAMA_EMBEDDING_API_KEY:}
+      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
+      model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}
 
 # PGVector 설정
 pgvector:
-  # # 데이터베이스 연결 정보 (DB 연결은 spring.datasource 재사용)
-  # host: localhost
-  # port: 5432
-  # database: ragdb
-  # username: postgres
-  # password: postgres
-  
   # 벡터 저장소 테이블 설정
   table-name: document_embeddings
   # 벡터 차원 (ko-sroberta-multitask 모델의 출력 차원)

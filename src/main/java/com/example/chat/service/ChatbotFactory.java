@@ -4,6 +4,7 @@ import com.example.chat.repository.PersistentChatMemoryStore;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.service.AiServices;
 import lombok.extern.slf4j.Slf4j;
@@ -26,10 +27,18 @@ public class ChatbotFactory {
 
     private final ContentRetriever contentRetriever;
     private final PersistentChatMemoryStore chatMemoryStore;
-    private final OllamaStreamingChatModel defaultStreamingModel;
+    private final StreamingChatModel defaultStreamingModel;
 
-    @Value("${langchain4j.ollama.base-url}")
-    private String ollamaBaseUrl;
+    @Value("${langchain4j.ollama.chat-model.base-url}")
+    private String chatModelBaseUrl;
+
+    /** 인증이 필요할 때만 설정. api-type과는 별개 값 (있다고 무조건 openai는 아님) */
+    @Value("${langchain4j.ollama.chat-model.api-key:}")
+    private String chatModelApiKey;
+
+    /** ollama(네이티브, 기본값) | openai(OpenAI 호환) */
+    @Value("${langchain4j.ollama.chat-model.api-type:ollama}")
+    private String chatModelApiType;
 
     @Value("${langchain4j.ollama.chat-model.model-name}")
     private String defaultModelName;
@@ -39,6 +48,10 @@ public class ChatbotFactory {
 
     @Value("${langchain4j.ollama.chat-model.timeout:60s}")
     private Duration defaultTimeout;
+
+    /** 컨텍스트 윈도우(num_ctx). Ollama 네이티브(api-type=ollama)일 때만 적용, 0이면 Ollama 기본값 사용 */
+    @Value("${langchain4j.ollama.chat-model.num-ctx:0}")
+    private Integer chatModelNumCtx;
 
     @Value("${chat.memory.max-messages:20}")
     private int maxMessages;
@@ -52,7 +65,7 @@ public class ChatbotFactory {
             @Qualifier("hybridContentRetriever") @Autowired(required = false) ContentRetriever hybridContentRetriever,
             @Qualifier("contentRetriever") ContentRetriever denseContentRetriever,
             PersistentChatMemoryStore chatMemoryStore,
-            OllamaStreamingChatModel defaultStreamingModel) {
+            StreamingChatModel defaultStreamingModel) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
         this.contentRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
         this.chatMemoryStore = chatMemoryStore;
@@ -122,15 +135,29 @@ public class ChatbotFactory {
     }
 
     /**
-     * 스트리밍 모델 생성
+     * 스트리밍 모델 생성.
+     * api-type이 openai면 OpenAI 호환 서버, 아니면(기본값 ollama) Ollama 네이티브를 사용한다.
      */
     private StreamingChatModel createStreamingModel(String modelName) {
-        return OllamaStreamingChatModel.builder()
-                .baseUrl(ollamaBaseUrl)
+        if ("openai".equalsIgnoreCase(chatModelApiType)) {
+            String apiKey = (chatModelApiKey == null || chatModelApiKey.isBlank()) ? "not-needed" : chatModelApiKey;
+            return OpenAiStreamingChatModel.builder()
+                    .baseUrl(chatModelBaseUrl)
+                    .apiKey(apiKey)
+                    .modelName(modelName)
+                    .temperature(defaultTemperature)
+                    .timeout(defaultTimeout)
+                    .build();
+        }
+        var builder = OllamaStreamingChatModel.builder()
+                .baseUrl(chatModelBaseUrl)
                 .modelName(modelName)
                 .temperature(defaultTemperature)
-                .timeout(defaultTimeout)
-                .build();
+                .timeout(defaultTimeout);
+        if (chatModelNumCtx != null && chatModelNumCtx > 0) {
+            builder.numCtx(chatModelNumCtx);
+        }
+        return builder.build();
     }
 
     /**

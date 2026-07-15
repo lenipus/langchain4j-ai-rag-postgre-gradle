@@ -1,0 +1,19 @@
+services:
+  redis:
+    image: redis/redis-stack:7.4.0-v8
+    environment:
+      TZ: Asia/Seoul
+    ports:
+      - "32379:6379"  # Redis 포트
+      - "32540:8001"  # RedisInsight 웹 UI 포트
+    command:
+      - redis-stack-server
+      - --requirepass
+      - redis
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    volumes:
+      - ./redis_data:/data
+    restart: unless-stopped

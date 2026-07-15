@@ -755,11 +755,16 @@
                             modelSelect.appendChild(option);
                         });
 
-                        // 기본 모델 선택
-                        if (defaultModel && availableModels.includes(defaultModel)) {
+                        // 기본 모델 선택. 기본 모델이 없거나 목록에 없으면 첫 번째 모델을 대신 선택한다.
+                        const hasMatchingDefault = defaultModel && availableModels.includes(defaultModel);
+                        if (hasMatchingDefault) {
                             modelSelect.value = defaultModel;
                             selectedModel = defaultModel;
                             console.log('기본 모델 선택됨:', defaultModel);
+                        } else if (availableModels.length > 0) {
+                            modelSelect.value = availableModels[0];
+                            selectedModel = availableModels[0];
+                            console.log('기본 모델이 없거나 목록에 없어 첫 번째 모델 선택됨:', selectedModel);
                         }
 
                         // 모델 선택 영역 표시
@@ -767,10 +772,10 @@
 
                         // 상태 메시지 업데이트
                         if (availableModels.length > 0) {
-                            if (defaultModel && availableModels.includes(defaultModel)) {
+                            if (hasMatchingDefault) {
                                 modelStatus.textContent = `${availableModels.length}개 모델 발견 (기본: ${defaultModel})`;
                             } else {
-                                modelStatus.textContent = `${availableModels.length}개 모델 발견`;
+                                modelStatus.textContent = `${availableModels.length}개 모델 발견 (기본 모델 미설정, ${selectedModel} 선택됨)`;
                             }
                             modelStatus.className = 'model-status success';
                         } else {
@@ -892,6 +897,18 @@
 
             if (message === '') return;
 
+            // 모델이 선택되지 않았으면 전송을 막고 안내한다.
+            const selectedModel = getSelectedModel();
+            if (!selectedModel || selectedModel.trim() === '') {
+                alert('모델을 선택해주세요.');
+                const modelStatus = document.getElementById('model-status');
+                if (modelStatus) {
+                    modelStatus.textContent = '모델을 선택해주세요';
+                    modelStatus.className = 'model-status warning';
+                }
+                return;
+            }
+
             // 버튼 비활성화
             sendBtn.disabled = true;
 
@@ -909,9 +926,6 @@
 
             // 스트리밍 API 엔드포인트 결정
             const endpoint = currentMode === 'rag' ? '/ai/rag/stream' : '/ai/simple/stream';
-
-            // 선택된 모델 가져오기
-            const selectedModel = getSelectedModel();
 
             // URL 파라미터 구성
             const params = new URLSearchParams();

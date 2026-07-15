@@ -58,7 +58,8 @@ dependencies {
     implementation 'dev.langchain4j:langchain4j-ollama'
 
     // LangChain4j OpenAI 호환 클라이언트 (원격 Ollama 호환 서버 - 채팅/임베딩 공용)
-    implementation 'dev.langchain4j:langchain4j-open-ai'
+    // BOM(egovframe-boot-starter-parent)에 이 모듈 버전이 없어 langchain4j-ollama와 동일한 1.8.0으로 명시
+    implementation 'dev.langchain4j:langchain4j-open-ai:1.8.0'
 
     // LangChain4j PGVector Store
     implementation 'dev.langchain4j:langchain4j-pgvector'
