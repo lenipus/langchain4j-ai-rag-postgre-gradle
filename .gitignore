@@ -20,3 +20,6 @@ upload/data/
 .classpath
 .settings/
 .factorypath
+
+# IntelliJ 프로젝트 메타데이터 (개인 환경, 공유 불필요)
+.idea/

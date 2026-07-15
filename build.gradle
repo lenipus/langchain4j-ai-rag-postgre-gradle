@@ -44,7 +44,7 @@ dependencyManagement {
 // 전역으로 걸어 logback을 확실히 제거한다. eGovFrame RTE(egovframe-rte-ptl-mvc)가
 // 직접 끌어오는 log4j2(log4j-core, log4j-slf4j2-impl)만 남아야 한다.
 // (logback과 log4j-to-slf4j가 log4j-slf4j2-impl과 함께 있으면 LoggingException 발생)
-configurations.all {
+configurations.configureEach {
     exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
 }
 
@@ -54,8 +54,11 @@ dependencies {
     // LangChain4j Core
     implementation 'dev.langchain4j:langchain4j'
 
-    // LangChain4j Ollama Integration
+    // LangChain4j Ollama Integration (로컬 Ollama 네이티브 API 클라이언트)
     implementation 'dev.langchain4j:langchain4j-ollama'
+
+    // LangChain4j OpenAI 호환 클라이언트 (원격 Ollama 호환 서버 - 채팅/임베딩 공용)
+    implementation 'dev.langchain4j:langchain4j-open-ai'
 
     // LangChain4j PGVector Store
     implementation 'dev.langchain4j:langchain4j-pgvector'
