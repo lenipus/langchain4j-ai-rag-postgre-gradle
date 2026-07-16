@@ -88,13 +88,17 @@ pgvector:
 
 # 문서 처리 설정
 document:
+  # 업로드 허용 확장자 (콤마 구분). 프론트(업로드 파일 선택창/검증)와 백엔드 검증이
+  # 모두 이 값 하나만 보고 동작한다 - 확장자 추가/제거는 여기 한 줄만 고치면 된다.
+  allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx
+
   # 문서 경로 설정
-  upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
-  path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.md
-  pdf-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.pdf
-  docx-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.docx
-  # hwp-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.hwp
-  # hwpx-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.hwpx
+  upload-dir: ${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data
+  path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.md
+  pdf-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.pdf
+  docx-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.docx
+  hwp-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.hwp
+  hwpx-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.hwpx
 
   # PDF 리더 설정
   pdf:
@@ -135,7 +139,7 @@ rag:
 
   # RAG 유사도 임계값 설정 (0.0 ~ 1.0)
   similarity:
-    threshold: 0.70
+    threshold: 0.30
 
   # RAG 검색 결과 개수 (Top K)
   top-k: 3

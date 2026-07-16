@@ -47,7 +47,10 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     @Value("${spring.servlet.multipart.max-request-size}")
     private DataSize maxRequestSize;
 
-    private static final Set<String> ALLOWED_UPLOAD_EXTENSIONS = Set.of(".md", ".pdf", ".docx");
+    // 업로드 허용 확장자. document.allowed-upload-extensions 프로퍼티 하나로 프론트(EgovWebController가
+    // 뷰에 전달) 및 백엔드 검증이 동시에 관리된다.
+    @Value("${document.allowed-upload-extensions:.md,.pdf,.docx}")
+    private String[] allowedUploadExtensions;
 
     // ETL 파이프라인 컴포넌트들
     private final EgovMarkdownReader egovMarkdownReader;
@@ -202,10 +205,10 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
             }
             String filename = Paths.get(originalFilename).getFileName().toString();
             String lowerFilename = filename.toLowerCase();
-            boolean allowedExtension = ALLOWED_UPLOAD_EXTENSIONS.stream().anyMatch(lowerFilename::endsWith);
+            boolean allowedExtension = Arrays.stream(allowedUploadExtensions).anyMatch(lowerFilename::endsWith);
             if (!allowedExtension) {
                 result.put("success", false);
-                result.put("message", "마크다운(.md), PDF(.pdf), Word(.docx) 파일만 업로드 가능합니다.");
+                result.put("message", String.join(", ", allowedUploadExtensions) + " 파일만 업로드 가능합니다.");
                 result.putIfAbsent("files", Collections.emptyList());
                 return result;
             }

@@ -30,9 +30,11 @@ class EgovDocumentServiceImplUploadValidationTest {
             new EgovDocumentServiceImpl(null, null, null, null, null, null, null, null, null, null);
 
     {
-        // @Value로 주입되는 용량 제한값은 Spring 컨텍스트 밖에서는 채워지지 않으므로 수동 주입한다.
+        // @Value로 주입되는 용량 제한값/허용 확장자는 Spring 컨텍스트 밖에서는 채워지지 않으므로 수동 주입한다.
         ReflectionTestUtils.setField(service, "maxFileSize", DataSize.ofMegabytes(100));
         ReflectionTestUtils.setField(service, "maxRequestSize", DataSize.ofMegabytes(500));
+        ReflectionTestUtils.setField(service, "allowedUploadExtensions",
+                new String[] { ".md", ".pdf", ".docx", ".hwp", ".hwpx" });
     }
 
     private MockMultipartFile md(String filename, int size) {
@@ -90,7 +92,7 @@ class EgovDocumentServiceImplUploadValidationTest {
         Map<String, Object> result = service.uploadMarkdownFiles(files);
 
         assertThat(result.get("success")).isEqualTo(false);
-        assertThat(result.get("message")).isEqualTo("마크다운(.md), PDF(.pdf), Word(.docx) 파일만 업로드 가능합니다.");
+        assertThat(result.get("message")).isEqualTo(".md, .pdf, .docx, .hwp, .hwpx 파일만 업로드 가능합니다.");
     }
 
     @Test

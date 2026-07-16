@@ -21,6 +21,11 @@ public class EgovWebController {
     @Value("${spring.servlet.multipart.max-request-size}")
     private DataSize maxRequestSize;
 
+    // 업로드 허용 확장자도 같은 이유로 서버 설정(document.allowed-upload-extensions)을
+    // 그대로 뷰에 전달한다 - chat.html/EgovDocumentServiceImpl이 각자 하드코딩하지 않도록.
+    @Value("${document.allowed-upload-extensions:.md,.pdf,.docx}")
+    private String allowedUploadExtensions;
+
     /**
      * 채팅 페이지 제공
      */
@@ -28,6 +33,7 @@ public class EgovWebController {
     public String chatPage(Model model) {
         model.addAttribute("maxFileSizeMb", maxFileSize.toMegabytes());
         model.addAttribute("maxRequestSizeMb", maxRequestSize.toMegabytes());
+        model.addAttribute("allowedUploadExtensions", allowedUploadExtensions);
         return "chat";
     }
 }

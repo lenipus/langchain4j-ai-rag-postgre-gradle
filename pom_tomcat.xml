@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    외장 톰캣(WAR) 배포용 pom.
+    기본 pom.xml은 jar 패키징(내장 톰캣, Docker 이미지 빌드용)이라 그대로 두고,
+    WAR 빌드가 필요할 때만 이 파일을 -f 옵션으로 지정해 사용한다.
+
+    사용법:
+      mvn -f pom_tomcat.xml clean package
+      -> target/langchain4j-ai-rag-postgre.war 생성, 외장 톰캣의 webapps/ 에 배포
+
+    pom.xml과의 차이점:
+      1) <packaging>war</packaging>
+      2) spring-boot-starter-tomcat 을 provided 스코프로 명시
+         (spring-boot-starter-web 이 끌어오는 내장 톰캣과 외장 톰캣 클래스 충돌 방지)
+      3) maven-war-plugin 설정 (WEB-INF/lib 등 기본 동작, warName 지정)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+		<groupId>org.egovframe.boot</groupId>
+		<artifactId>egovframe-boot-starter-parent</artifactId>
+		<version>5.0.0</version>
+		<relativePath/>
+	</parent>
+
+    <groupId>com.example</groupId>
+    <artifactId>langchain4j-ai-rag-postgre</artifactId>
+    <version>1.0.0</version>
+    <packaging>war</packaging>
+    <name>langchain4j-ai-rag-postgre</name>
+    <description>RAG application using LangChain4j and PostgreSQL with PGVector (WAR/외장 톰캣 배포용)</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    </properties>
+
+    <repositories>
+		<repository>
+			<id>mvn2s</id>
+			<url>https://repo1.maven.org/maven2/</url>
+			<releases>
+				<enabled>true</enabled>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+		</repository>
+		<repository>
+			<id>egovframe2</id>
+			<url>https://maven.egovframe.go.kr/maven/</url>
+			<releases>
+				<enabled>true</enabled>
+			</releases>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+		</repository>
+	</repositories>
+
+    <dependencies>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- LangChain4j Core -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+        </dependency>
+
+        <!-- LangChain4j Ollama Integration -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-ollama</artifactId>
+        </dependency>
+
+        <!-- LangChain4j PGVector Store -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-pgvector</artifactId>
+        </dependency>
+
+        <!-- LangChain4j ONNX Embeddings -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-embeddings</artifactId>
+        </dependency>
+
+        <!-- LangChain4j Document Parsers -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-document-parser-apache-pdfbox</artifactId>
+        </dependency>
+
+        <!-- eGovFrame Excel (POI OOXML 전이 의존성 — DOCX 파싱) -->
+        <dependency>
+            <groupId>org.egovframe.rte</groupId>
+            <artifactId>egovframe-rte-fdl-excel</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.commons</groupId>
+                    <artifactId>commons-lang3</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- LangChain4j Reactor (Flux 스트리밍 지원) -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-reactor</artifactId>
+        </dependency>
+
+        <!-- H2 Database (인메모리 H2, MODE=PostgreSQL로 PostgreSQL 호환 모드) -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.2.224</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Testcontainers: 하이브리드 lexical 검색(pg_trgm word_similarity) 실 DB 통합 테스트용.
+             Docker 미가용 환경에서는 @Testcontainers(disabledWithoutDocker=true)로 자동 skip. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Spring Boot Web -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.springframework.boot</groupId>
+					<artifactId>spring-boot-starter-logging</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+        <!-- 외장 톰캣에 서블릿 컨테이너를 맡기므로 provided 스코프로 전환.
+             (WAR 안에는 포함되지 않고, 컴파일/로컬 실행(mvn tomcat:run 등)에만 사용) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-tomcat</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Spring Boot WebFlux for Reactive Streaming -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Spring Boot Data JPA -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- eGovFrame Runtime -->
+        <dependency>
+			<groupId>org.egovframe.rte</groupId>
+			<artifactId>egovframe-rte-ptl-mvc</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.apache.commons</groupId>
+					<artifactId>commons-lang3</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
+        <!-- Apache Commons -->
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+        </dependency>
+        <!-- HWP 문서 파싱 (공공 행정문서 지원) -->
+        <dependency>
+            <groupId>kr.dogfoot</groupId>
+            <artifactId>hwplib</artifactId>
+            <version>1.1.9</version>
+        </dependency>
+        <!-- HWPX 문서 파싱 -->
+        <dependency>
+            <groupId>kr.dogfoot</groupId>
+            <artifactId>hwpxlib</artifactId>
+            <version>1.0.5</version>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Test Dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>langchain4j-ai-rag-postgre</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <configuration>
+                    <!-- 외장 톰캣이 자체 web.xml을 만들지 않아도 SpringBootServletInitializer가 대체하므로 실패 무시 -->
+                    <failOnMissingWebXml>false</failOnMissingWebXml>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
