@@ -119,7 +119,7 @@ document:
   max-num-chunks: 500
 
   # 임베딩할 최소 청크 길이
-  min-chunk-length-to-embed: 50
+  min-chunk-length-to-embed: 250
 
   # 문서 정규화 설정
   normalization:
