@@ -90,7 +90,7 @@ pgvector:
 document:
   # 업로드 허용 확장자 (콤마 구분). 프론트(업로드 파일 선택창/검증)와 백엔드 검증이
   # 모두 이 값 하나만 보고 동작한다 - 확장자 추가/제거는 여기 한 줄만 고치면 된다.
-  allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx
+  allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json
 
   # 문서 경로 설정
   upload-dir: ${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data
@@ -99,6 +99,9 @@ document:
   docx-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.docx
   hwp-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.hwp
   hwpx-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.hwpx
+  txt-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.txt
+  # 고정 스키마(제목/원본파일명/구축일자/게시일자/키워드/내용) JSON 문서 전용 경로
+  json-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.json
 
   # PDF 리더 설정
   pdf:
@@ -139,25 +142,31 @@ rag:
 
   # RAG 유사도 임계값 설정 (0.0 ~ 1.0)
   similarity:
-    threshold: 0.30
+    threshold: 0.60
 
   # RAG 검색 결과 개수 (Top K)
-  top-k: 3
+  top-k: 5
 
   # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
   retrieval:
     hybrid:
-      # 활성화 여부. false(기본)이면 dense 단일 검색만 사용 (기존 동작 유지)
-      enabled: false
+      # 활성화 여부. dense 단독 검색에서 다주제 혼합 청크(예: 여러 결재라인이 한 청크에
+      # 뭉친 안내자료)가 특정 질의에 뾰족하게 반응하지 못해 상위 top-k 밖으로 밀려나는
+      # 사례가 확인되어 켠다. lexical(정확 단어 매칭)이 이런 경우를 보완한다.
+      enabled: true
       # 채널 가중치
       weight:
         dense: 1.0
         lexical: 1.0
-      # 융합 결과 개수. 미설정 시 rag.top-k 값을 사용
-      top-k: 3
+      # 융합 결과 개수. 실제 코퍼스 측정상 정답 청크가 lexical 랭킹 3~4위에 걸리는 사례가
+      # 있어 3에서 상향. 미설정 시 rag.top-k 값을 사용.
+      top-k: 10
       # lexical(pg_trgm word_similarity) 임계값. `%>` 연산자가 참조하는 GUC
       # pg_trgm.word_similarity_threshold(기본 0.6)는 한국어 긴 청크에 과도하게 엄격하다.
-      # 실제 문서(4000자 청크) 측정상 0.30 부근이 recall@3~0.8로 최적. 트랜잭션 스코프로만
+      # 실제 운영 코퍼스(다주제 혼합 청크 포함)를 직접 질의해 측정한 결과, 정답 청크의
+      # word_similarity가 0.13~0.15 수준으로 낮게 나와 0.30에서는 `%>` 필터에서 아예
+      # 걸러졌다(후보군 진입 자체가 안 됨). 실측값보다 낮은 0.10으로 낮춰 후보군에는
+      # 들어오게 하되, RRF 융합·top-k(6)가 최종 필터링을 담당하게 한다. 트랜잭션 스코프로만
       # 적용되어 커넥션 풀에 누수되지 않는다. recall을 더 원하면 하향(노이즈↑), 정밀도를
       # 원하면 상향한다.
       lexical:

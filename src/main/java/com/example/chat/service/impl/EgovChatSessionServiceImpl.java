@@ -57,6 +57,14 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                 .collect(Collectors.toList());
     }
 
+    /**
+     * LangChain4j DefaultContentInjector가 사용자 메시지에 덧붙이는 RAG 컨텍스트 구분자.
+     * ChatMemoryStore(PersistentChatMemoryStore)는 AiServices가 현재 턴의 프롬프트를
+     * 재구성할 때도 그대로 재사용하는 소스이므로 저장 시점에 잘라내면 안 되고,
+     * 화면 표시용으로 조회할 때만 잘라낸다.
+     */
+    private static final String RAG_INJECTION_MARKER = "\n\nAnswer using the following information:\n";
+
     @Override
     @Transactional(readOnly = true)
     public List<ChatMessageDto> getSessionMessages(String sessionId) {
@@ -68,9 +76,19 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                         "ASSISTANT".equals(entity.getMessageType()))
                 .map(entity -> new ChatMessageDto(
                         entity.getMessageType(),
-                        entity.getContent(),
+                        "USER".equals(entity.getMessageType())
+                                ? stripRagInjection(entity.getContent())
+                                : entity.getContent(),
                         entity.getCreatedAt()))
                 .collect(Collectors.toList());
+    }
+
+    private String stripRagInjection(String content) {
+        if (content == null) {
+            return null;
+        }
+        int index = content.indexOf(RAG_INJECTION_MARKER);
+        return index >= 0 ? content.substring(0, index) : content;
     }
 
     @Override

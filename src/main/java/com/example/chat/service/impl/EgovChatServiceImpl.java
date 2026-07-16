@@ -11,6 +11,9 @@ import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  * 세션별 채팅 서비스 구현체
  * - AiServices 기반 스트리밍 구현
@@ -33,15 +36,27 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
     @Override
     public Flux<String> streamRagResponse(String query, String model) {
         String sessionId = SessionContext.getCurrentSessionId();
-        log.info("RAG 스트리밍 질의 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
+        long startTime = System.currentTimeMillis();
+        log.info("RAG 스트리밍 질의 시작 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
 
         try {
             validateSessionId(sessionId);
 
+            AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
+            AtomicLong answerLength = new AtomicLong(0);
+
             // RAG 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
             RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId);
             return ragChatbot.streamChat(query)
-                    .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}", sessionId))
+                    .doOnNext(chunk -> {
+                        answerLength.addAndGet(chunk.length());
+                        if (firstChunkReceived.compareAndSet(false, true)) {
+                            log.info("RAG 답변 수신 시작 - 세션: {}, 소요: {}ms",
+                                    sessionId, System.currentTimeMillis() - startTime);
+                        }
+                    })
+                    .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                            sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
                     .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e));
 
         } catch (Exception e) {
@@ -57,15 +72,27 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
     @Override
     public Flux<String> streamSimpleResponse(String query, String model) {
         String sessionId = SessionContext.getCurrentSessionId();
-        log.info("Simple 스트리밍 질의 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
+        long startTime = System.currentTimeMillis();
+        log.info("Simple 스트리밍 질의 시작 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
 
         try {
             validateSessionId(sessionId);
 
+            AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
+            AtomicLong answerLength = new AtomicLong(0);
+
             // Simple 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
             SimpleChatbot simpleChatbot = chatbotFactory.createSimpleChatbot(model, sessionId);
             return simpleChatbot.streamChat(query)
-                    .doOnComplete(() -> log.info("Simple 스트리밍 완료 - 세션: {}", sessionId))
+                    .doOnNext(chunk -> {
+                        answerLength.addAndGet(chunk.length());
+                        if (firstChunkReceived.compareAndSet(false, true)) {
+                            log.info("Simple 답변 수신 시작 - 세션: {}, 소요: {}ms",
+                                    sessionId, System.currentTimeMillis() - startTime);
+                        }
+                    })
+                    .doOnComplete(() -> log.info("Simple 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                            sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
                     .doOnError(e -> log.error("Simple 스트리밍 오류 - 세션: {}", sessionId, e));
 
         } catch (Exception e) {

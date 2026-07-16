@@ -25,16 +25,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EgovDocumentServiceImplUploadValidationTest {
 
     // 검증 거부 분기만 대상으로 하므로 모든 협력 객체는 null로 둔다. 인자 수는
-    // EgovDocumentServiceImpl 생성자(리더 5 + 변환 2 + writer + repository + executor = 10)와 일치.
+    // EgovDocumentServiceImpl 생성자(리더 7 + 변환 2 + writer + repository + executor = 12)와 일치.
     private final EgovDocumentServiceImpl service =
-            new EgovDocumentServiceImpl(null, null, null, null, null, null, null, null, null, null);
+            new EgovDocumentServiceImpl(null, null, null, null, null, null, null, null, null, null, null, null);
 
     {
         // @Value로 주입되는 용량 제한값/허용 확장자는 Spring 컨텍스트 밖에서는 채워지지 않으므로 수동 주입한다.
         ReflectionTestUtils.setField(service, "maxFileSize", DataSize.ofMegabytes(100));
         ReflectionTestUtils.setField(service, "maxRequestSize", DataSize.ofMegabytes(500));
         ReflectionTestUtils.setField(service, "allowedUploadExtensions",
-                new String[] { ".md", ".pdf", ".docx", ".hwp", ".hwpx" });
+                new String[] { ".md", ".pdf", ".docx", ".hwp", ".hwpx", ".txt", ".json" });
     }
 
     private MockMultipartFile md(String filename, int size) {
@@ -87,12 +87,12 @@ class EgovDocumentServiceImplUploadValidationTest {
     @Test
     @DisplayName("허용되지 않은 확장자는 거부한다")
     void rejectsNonMarkdownExtension() {
-        MultipartFile[] files = { md("note.txt", 10) };
+        MultipartFile[] files = { md("note.exe", 10) };
 
         Map<String, Object> result = service.uploadMarkdownFiles(files);
 
         assertThat(result.get("success")).isEqualTo(false);
-        assertThat(result.get("message")).isEqualTo(".md, .pdf, .docx, .hwp, .hwpx 파일만 업로드 가능합니다.");
+        assertThat(result.get("message")).isEqualTo(".md, .pdf, .docx, .hwp, .hwpx, .txt, .json 파일만 업로드 가능합니다.");
     }
 
     @Test

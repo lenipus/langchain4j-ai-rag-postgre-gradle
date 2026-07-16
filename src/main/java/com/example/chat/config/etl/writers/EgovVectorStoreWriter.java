@@ -61,17 +61,12 @@ public class EgovVectorStoreWriter {
                 List<Document> batch = documents.subList(i, Math.min(i + BATCH_SIZE, total));
 
                 List<TextSegment> segments = new ArrayList<>();
-                List<Embedding> embeddings = new ArrayList<>();
-
                 for (Document doc : batch) {
-                    // TextSegment 생성 (메타데이터 포함)
-                    TextSegment segment = TextSegment.from(doc.text(), doc.metadata());
-                    segments.add(segment);
-
-                    // 임베딩 생성
-                    Embedding embedding = embeddingModel.embed(doc.text()).content();
-                    embeddings.add(embedding);
+                    segments.add(TextSegment.from(doc.text(), doc.metadata()));
                 }
+
+                // 배치 전체를 한 번의 임베딩 API 호출로 처리한다(건별 호출 대비 네트워크 왕복 감소).
+                List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
 
                 // 벡터 저장소에 배치 저장
                 embeddingStore.addAll(embeddings, segments);

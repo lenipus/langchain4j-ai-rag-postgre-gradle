@@ -1,5 +1,6 @@
 package com.example.chat.service;
 
+import com.example.chat.config.EgovLoggingContentRetriever;
 import com.example.chat.repository.PersistentChatMemoryStore;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -67,7 +68,9 @@ public class ChatbotFactory {
             PersistentChatMemoryStore chatMemoryStore,
             StreamingChatModel defaultStreamingModel) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
-        this.contentRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
+        ContentRetriever selectedRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
+        // 실제 검색은 selectedRetriever에 위임하고, LLM에 넘어가는 검색 결과만 로그로 남긴다.
+        this.contentRetriever = new EgovLoggingContentRetriever(selectedRetriever);
         this.chatMemoryStore = chatMemoryStore;
         this.defaultStreamingModel = defaultStreamingModel;
 

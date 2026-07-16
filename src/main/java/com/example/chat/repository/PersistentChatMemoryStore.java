@@ -35,7 +35,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     @Transactional(readOnly = true)
     public List<ChatMessage> getMessages(Object memoryId) {
         String sessionId = memoryId.toString();
-        log.debug("채팅 메모리 조회 - 세션: {}", sessionId);
+        // log.debug("채팅 메모리 조회 - 세션: {}", sessionId);
 
         List<ChatMemoryEntity> entities = chatMemoryRepository
                 .findBySessionIdOrderByCreatedAtAsc(sessionId);
@@ -48,7 +48,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
             }
         }
 
-        log.debug("채팅 메모리 조회 완료 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
+        // log.debug("채팅 메모리 조회 완료 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
         return messages;
     }
 
