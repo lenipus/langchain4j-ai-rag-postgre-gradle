@@ -1,9 +1,9 @@
 package com.example.chat;
 
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import com.example.chat.config.EgovLangChain4jConfig;
 import org.junit.jupiter.api.Test;
@@ -22,10 +22,10 @@ class Langchain4jRagApplicationTests {
     private EmbeddingModel embeddingModel;
 
     @MockitoBean
-    private OllamaChatModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
 
     @MockitoBean
-    private OllamaStreamingChatModel streamingChatLanguageModel;
+    private StreamingChatModel streamingChatLanguageModel;
 
     @MockitoBean
     private EmbeddingStore<TextSegment> embeddingStore;

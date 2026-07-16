@@ -38,8 +38,8 @@ app:
 # LangChain4j Ollama 설정 (테스트 시 dummy)
 langchain4j:
   ollama:
-    base-url: http://localhost:11434
     chat-model:
+      base-url: http://localhost:11434
       model-name: HyperCLOVA-3b:Q4_K_MM
       temperature: 0.4
       timeout: 60s
