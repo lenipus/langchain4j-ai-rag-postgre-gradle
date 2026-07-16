@@ -62,7 +62,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     @Transactional
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         String sessionId = memoryId.toString();
-        log.debug("채팅 메모리 업데이트 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
+        // log.debug("채팅 메모리 업데이트 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
 
         // 기존 메시지 삭제
         chatMemoryRepository.deleteBySessionId(sessionId);
@@ -75,7 +75,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
             }
         }
 
-        log.debug("채팅 메모리 업데이트 완료 - 세션: {}", sessionId);
+        // log.debug("채팅 메모리 업데이트 완료 - 세션: {}", sessionId);
     }
 
     /**

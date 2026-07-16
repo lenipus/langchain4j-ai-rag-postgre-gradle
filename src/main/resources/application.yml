@@ -29,6 +29,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+        session_factory:
+          statement_inspector: com.example.chat.config.DynamicTableInspector
     show-sql: false
 
   # 빈 오버라이딩 허용
@@ -73,18 +75,27 @@ langchain4j:
       base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_EMBEDDING_API_KEY:}
       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
-      model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}
+      model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:qllama/bge-m3:q8_0}
+      # model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}
 
 # PGVector 설정
 pgvector:
-  # 벡터 저장소 테이블 설정
-  table-name: document_embeddings
-  # 벡터 차원 (ko-sroberta-multitask 모델의 출력 차원)
-  dimension: 768
-  # 인덱스 생성 여부
+  # 거리 측정 방식 (cosine, euclidean, inner_product)
+
+  # embeddinggemma:300m 용
+  # table-name: document_embeddings
+  # dimension: 768
+  # create-table: true
+  # distance-type: cosine
+  # hash-table-name: document_hashes
+
+  # bge-m3 용
+  table-name: document_embeddings_bgem3
+  dimension: 1024
   create-table: true
   # 거리 측정 방식 (cosine, euclidean, inner_product)
   distance-type: cosine
+  hash-table-name: document_hashes_bgem3
 
 # 문서 처리 설정
 document:
