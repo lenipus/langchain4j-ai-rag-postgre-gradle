@@ -292,10 +292,19 @@ VSCode의 `vscjava.vscode-java-pack`(Extension Pack for Java)에는 **"Gradle fo
 
    | 변수 | 기본값(yml) | 언제 오버라이드해야 하나 |
    |---|---|---|
-   | `SERVER_PORT` | `8080` | 포트 충돌 시 |
-   | `OLLAMA_BASE_URL` | `http://localhost:31434` | 네이티브 Ollama(포트 11434) 사용 시 필수 |
-   | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `32379` / (없음) | 프로젝트 `docker-compose.yml` 기본값 그대로 쓰면 불필요 |
-   | `DOCUMENT_UPLOAD_PATH` | 작성자 개인 경로 | **항상 자신의 로컬 경로로 재설정 필요** |
+   | `SERVER_PORT` | `8081` | 포트 충돌 시 |
+   | `POSTGRES_HOST` / `POSTGRES_PORT` | `127.0.0.1` / `35432` | 프로젝트 `docker-compose.yml` 기본값(35432) 그대로 쓰면 불필요 |
+   | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `tester` / `test123#` | DB 계정을 기본값과 다르게 쓸 때 |
+   | `OLLAMA_CHAT_BASE_URL` | `http://localhost:31434` | 네이티브 Ollama(포트 11434) 사용 시 필수 |
+   | `OLLAMA_CHAT_MODEL_NAME` | (없음) | **항상 지정 필요** — 미지정 시 채팅 모델을 찾지 못함 |
+   | `OLLAMA_CHAT_API_KEY` | (없음) | OpenAI 호환 엔드포인트 등 인증이 필요한 서버 사용 시 |
+   | `OLLAMA_CHAT_API_TYPE` | `ollama` | 값은 `ollama`(네이티브 API) \| `openai`(OpenAI 호환 API, `base-url`에 `/v1` 포함 필요) 두 가지. 네이티브 Ollama면 기본값 유지 |
+   | `OLLAMA_CHAT_NUM_CTX` | `0`(Ollama 기본값 사용) | 컨텍스트 윈도우(`num_ctx`) 크기를 조정할 때 (`api-type=ollama`일 때만 적용) |
+   | `OLLAMA_EMBEDDING_BASE_URL` | `http://localhost:31434` | 임베딩 서버를 채팅과 다르게 분리할 때 |
+   | `OLLAMA_EMBEDDING_MODEL_NAME` | `embeddinggemma:300m` | 다른 임베딩 모델 사용 시 |
+   | `OLLAMA_EMBEDDING_API_KEY` | (없음) | OpenAI 호환 엔드포인트 등 인증이 필요한 서버 사용 시 |
+   | `OLLAMA_EMBEDDING_API_TYPE` | `ollama` | 값은 `ollama` \| `openai` 두 가지 (의미는 `OLLAMA_CHAT_API_TYPE`과 동일) |
+   | `DOCUMENT_UPLOAD_PATH` | `/app/rag/upload` | **항상 자신의 로컬 경로로 재설정 필요** |
 
 4. **콘솔 한글 인코딩(UTF-8)**
 
