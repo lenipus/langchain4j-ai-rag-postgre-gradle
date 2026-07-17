@@ -104,15 +104,15 @@ document:
   allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json
 
   # 문서 경로 설정
-  upload-dir: ${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data
-  path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.md
-  pdf-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.pdf
-  docx-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.docx
-  hwp-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.hwp
-  hwpx-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.hwpx
-  txt-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.txt
+  upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
+  path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.md
+  pdf-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.pdf
+  docx-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.docx
+  hwp-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.hwp
+  hwpx-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.hwpx
+  txt-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.txt
   # 고정 스키마(제목/원본파일명/구축일자/게시일자/키워드/내용) JSON 문서 전용 경로
-  json-path: file:${DOCUMENT_UPLOAD_PATH:D:/app/rag/upload}/data/**/*.json
+  json-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.json
 
   # PDF 리더 설정
   pdf:

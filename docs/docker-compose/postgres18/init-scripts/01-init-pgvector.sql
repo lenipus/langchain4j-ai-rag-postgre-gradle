@@ -36,3 +36,17 @@ CREATE TABLE IF NOT EXISTS chat_memory (
 CREATE INDEX IF NOT EXISTS idx_chat_memory_session_id ON chat_memory(session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_memory_created_at ON chat_memory(created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC);
+
+-- 이 스크립트는 관리자 계정(POSTGRES_USER, 기본 postgres)으로 실행되어 위 테이블들의
+-- 소유자가 관리자 계정이 된다. 반면 애플리케이션(application.yml)은 별도의 운영 계정
+-- (tester)으로 접속하므로, tester 계정에 아래 권한을 별도로 부여하지 않으면
+-- "permission denied for table document_hashes" 같은 에러가 난다. 관리자 계정을
+-- 애플리케이션에 그대로 쓰지 않고 운영 계정을 분리하는 것이 원칙이라 여기서는 자동
+-- 실행하지 않고 참고용 로그로만 남긴다 — 실제 적용은 관리자 계정으로 psql 접속해
+-- 아래 GRANT문을 수동 실행한다.
+--
+-- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO tester;
+-- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO tester;
+-- GRANT USAGE, CREATE ON SCHEMA public TO tester;
+-- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO tester;
+-- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO tester;
