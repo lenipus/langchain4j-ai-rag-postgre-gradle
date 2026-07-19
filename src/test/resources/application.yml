@@ -59,8 +59,7 @@ pgvector:
 # 문서 처리 설정
 document:
   upload-dir: src/test/resources/non-existent-directory
-  path: file:src/test/resources/non-existent-directory/*.md
-  pdf-path: file:src/test/resources/non-existent-directory/*.pdf
+  allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
 
   pdf:
     page-top-margin: 0

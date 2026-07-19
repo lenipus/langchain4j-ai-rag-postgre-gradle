@@ -9,14 +9,12 @@ import kr.dogfoot.hwplib.tool.textextractor.TextExtractMethod;
 import kr.dogfoot.hwplib.tool.textextractor.TextExtractor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * HWP(한글) 문서 로더
@@ -26,57 +24,19 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class EgovHwpReader {
+public class EgovHwpReader implements EgovDocumentReader {
 
     private final DocumentIdUtil documentIdUtil;
 
-    @Value("${document.hwp-path:#{null}}")
-    private String hwpDocumentPath;
+    @Override
+    public Set<String> supportedExtensions() {
+        return Set.of("hwp");
+    }
 
-    /**
-     * HWP 문서 로드
-     */
-    public List<Document> read() {
-        if (hwpDocumentPath == null || hwpDocumentPath.isBlank()) {
-            log.info("HWP 문서 경로가 설정되지 않아 건너뜁니다.");
-            return List.of();
-        }
-
-        log.info("HWP 문서 읽기 시작 - 경로: {}", hwpDocumentPath);
-
-        try {
-            PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-            Resource[] resources = resolver.getResources(hwpDocumentPath);
-
-            if (resources.length == 0) {
-                log.warn("HWP 파일을 찾을 수 없습니다: {}", hwpDocumentPath);
-                return List.of();
-            }
-
-            log.info("{}개의 HWP 파일을 찾았습니다.", resources.length);
-
-            List<Document> allDocuments = new ArrayList<>();
-
-            for (Resource resource : resources) {
-                log.info("HWP 파일 처리 중: {}", resource.getFilename());
-                try {
-                    Document doc = parseHwpDocument(resource);
-                    if (doc != null) {
-                        allDocuments.add(doc);
-                    }
-                } catch (Exception e) {
-                    log.error("HWP 파일 '{}' 처리 중 오류 발생: {}", resource.getFilename(), e.getMessage());
-                    // 개별 파일 오류는 무시하고 계속 진행
-                }
-            }
-
-            log.info("총 {}개의 HWP 문서를 읽었습니다.", allDocuments.size());
-            return allDocuments;
-
-        } catch (Exception e) {
-            log.error("HWP 문서 읽기 중 오류 발생", e);
-            return List.of();
-        }
+    @Override
+    public List<Document> parse(Resource resource) throws Exception {
+        Document document = parseHwpDocument(resource);
+        return document == null ? List.of() : List.of(document);
     }
 
     private Document parseHwpDocument(Resource resource) throws Exception {

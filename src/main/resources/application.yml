@@ -75,44 +75,37 @@ langchain4j:
       base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_EMBEDDING_API_KEY:}
       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
-      model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:qllama/bge-m3:q8_0}
-      # model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}
+      model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}  # embeddinggemma:300m, qllama/bge-m3:q8_0
 
 # PGVector 설정
 pgvector:
   # 거리 측정 방식 (cosine, euclidean, inner_product)
 
   # embeddinggemma:300m 용
-  # table-name: document_embeddings
-  # dimension: 768
-  # create-table: true
-  # distance-type: cosine
-  # hash-table-name: document_hashes
+  table-name: document_embeddings
+  dimension: 768
+  create-table: true
+  distance-type: cosine
+  hash-table-name: document_hashes
 
   # bge-m3 용
-  table-name: document_embeddings_bgem3
-  dimension: 1024
-  create-table: true
-  # 거리 측정 방식 (cosine, euclidean, inner_product)
-  distance-type: cosine
-  hash-table-name: document_hashes_bgem3
+  # table-name: document_embeddings_bgem3
+  # dimension: 1024
+  # create-table: true
+  # # 거리 측정 방식 (cosine, euclidean, inner_product)
+  # distance-type: cosine
+  # hash-table-name: document_hashes_bgem3
 
 # 문서 처리 설정
 document:
-  # 업로드 허용 확장자 (콤마 구분). 프론트(업로드 파일 선택창/검증)와 백엔드 검증이
-  # 모두 이 값 하나만 보고 동작한다 - 확장자 추가/제거는 여기 한 줄만 고치면 된다.
-  allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json
+  # 업로드 허용 확장자 (콤마 구분). 프론트(업로드 파일 선택창/검증)와 백엔드 검증,
+  # 그리고 EgovDocumentScanner의 색인 대상 필터가 모두 이 값 하나만 보고 동작한다 -
+  # 확장자 추가/제거는 여기 한 줄과(신규 포맷이면) EgovDocumentReader 구현체 하나만 있으면 된다.
+  allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
 
-  # 문서 경로 설정
+  # 문서 경로 설정. upload-dir 하위 전체를 재귀 스캔해 확장자별로 알맞은 리더에 위임한다
+  # (EgovDocumentScanner) - 확장자별 path 프로퍼티는 더 이상 필요 없다.
   upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
-  path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.md
-  pdf-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.pdf
-  docx-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.docx
-  hwp-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.hwp
-  hwpx-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.hwpx
-  txt-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.txt
-  # 고정 스키마(제목/원본파일명/구축일자/게시일자/키워드/내용) JSON 문서 전용 경로
-  json-path: file:${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data/**/*.json
 
   # PDF 리더 설정
   pdf:
@@ -134,17 +127,11 @@ document:
 
   # 문서 정규화 설정
   normalization:
-    # 정규화 기능 활성화 여부
     enabled: true
-    # HTML 태그 제거 여부
     remove-html-tags: true
-    # 마크다운 코드 블록 제거 여부
     remove-code-blocks: false
-    # 공백 정규화 여부
     normalize-whitespace: true
-    # 줄바꿈 정규화 여부
     normalize-newlines: true
-    # 특수문자 정리 여부
     clean-special-chars: true
 
 # RAG 설정
@@ -160,26 +147,13 @@ rag:
 
   # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
   retrieval:
+    overfetch-multiplier: 3
     hybrid:
-      # 활성화 여부. dense 단독 검색에서 다주제 혼합 청크(예: 여러 결재라인이 한 청크에
-      # 뭉친 안내자료)가 특정 질의에 뾰족하게 반응하지 못해 상위 top-k 밖으로 밀려나는
-      # 사례가 확인되어 켠다. lexical(정확 단어 매칭)이 이런 경우를 보완한다.
       enabled: true
-      # 채널 가중치
       weight:
         dense: 1.0
         lexical: 1.0
-      # 융합 결과 개수. 실제 코퍼스 측정상 정답 청크가 lexical 랭킹 3~4위에 걸리는 사례가
-      # 있어 3에서 상향. 미설정 시 rag.top-k 값을 사용.
       top-k: 10
-      # lexical(pg_trgm word_similarity) 임계값. `%>` 연산자가 참조하는 GUC
-      # pg_trgm.word_similarity_threshold(기본 0.6)는 한국어 긴 청크에 과도하게 엄격하다.
-      # 실제 운영 코퍼스(다주제 혼합 청크 포함)를 직접 질의해 측정한 결과, 정답 청크의
-      # word_similarity가 0.13~0.15 수준으로 낮게 나와 0.30에서는 `%>` 필터에서 아예
-      # 걸러졌다(후보군 진입 자체가 안 됨). 실측값보다 낮은 0.10으로 낮춰 후보군에는
-      # 들어오게 하되, RRF 융합·top-k(6)가 최종 필터링을 담당하게 한다. 트랜잭션 스코프로만
-      # 적용되어 커넥션 풀에 누수되지 않는다. recall을 더 원하면 하향(노이즈↑), 정밀도를
-      # 원하면 상향한다.
       lexical:
         word-similarity-threshold: 0.30
 

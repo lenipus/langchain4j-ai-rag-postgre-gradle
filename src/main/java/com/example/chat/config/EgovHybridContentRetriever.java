@@ -47,6 +47,8 @@ public class EgovHybridContentRetriever implements ContentRetriever {
     private final double lexicalWeight;
     private final double lexicalWordSimilarityThreshold;
     private final int topK;
+    private final int minChunkLengthToEmbed;
+    private final int overfetchMultiplier;
 
     public EgovHybridContentRetriever(ContentRetriever denseRetriever,
                                       JdbcTemplate jdbcTemplate,
@@ -55,7 +57,9 @@ public class EgovHybridContentRetriever implements ContentRetriever {
                                       double denseWeight,
                                       double lexicalWeight,
                                       double lexicalWordSimilarityThreshold,
-                                      int topK) {
+                                      int topK,
+                                      int minChunkLengthToEmbed,
+                                      int overfetchMultiplier) {
         this.denseRetriever = denseRetriever;
         this.jdbcTemplate = jdbcTemplate;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -64,6 +68,8 @@ public class EgovHybridContentRetriever implements ContentRetriever {
         this.lexicalWeight = lexicalWeight;
         this.lexicalWordSimilarityThreshold = lexicalWordSimilarityThreshold;
         this.topK = topK;
+        this.minChunkLengthToEmbed = minChunkLengthToEmbed;
+        this.overfetchMultiplier = overfetchMultiplier;
     }
 
     @Override
@@ -120,9 +126,14 @@ public class EgovHybridContentRetriever implements ContentRetriever {
         // Metadata.getString("id")와 동일한 문자열 값이 보장되어(숫자형·중첩·이스케이프
         // 무관) 융합 키가 채널 간 일치한다. ::jsonb 캐스팅으로 metadata가 text든 jsonb든
         // 안전하게 동작한다.
+        //
+        // 짧은 청크(스퓨리어스 매칭 위험)는 length(trim(...)) 조건으로 SQL 단에서 바로
+        // 제외한다 — dense 채널(EgovLengthFilteringContentRetriever)과 동일하게, top-k보다
+        // 넉넉히(overfetch) 가져와 최종 융합 단계(EgovRrfFusion.fuse)에서 topK로 잘린다.
         String sql = "SELECT " + TEXT_COLUMN + ", metadata::jsonb ->> 'id' AS " + DOC_ID_COLUMN
                 + " FROM " + tableName
-                + " WHERE " + TEXT_COLUMN + " %> ? ORDER BY word_similarity(?, " + TEXT_COLUMN + ") DESC LIMIT ?";
+                + " WHERE " + TEXT_COLUMN + " %> ? AND length(trim(" + TEXT_COLUMN + ")) >= ?"
+                + " ORDER BY word_similarity(?, " + TEXT_COLUMN + ") DESC LIMIT ?";
 
         // word_similarity 임계값을 트랜잭션 스코프(is_local=true)로만 적용한다. 트랜잭션
         // 커밋/롤백 시 값이 자동 복귀하므로 커넥션 풀에 임계값이 누수되지 않고, %>(GIN trigram
@@ -136,7 +147,7 @@ public class EgovHybridContentRetriever implements ContentRetriever {
                 String text = rs.getString(TEXT_COLUMN);
                 String docId = rs.getString(DOC_ID_COLUMN);
                 return toContent(text, docId);
-            }, queryText, queryText, topK);
+            }, queryText, minChunkLengthToEmbed, queryText, topK * overfetchMultiplier);
         });
     }
 

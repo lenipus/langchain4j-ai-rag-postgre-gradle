@@ -10,53 +10,44 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * {@link EgovEnhancedDocumentTransformer}가 청크 분할 후, 지나치게 짧은 청크(예: PDF
- * 페이지가 사실상 캡션 한 줄뿐인 경우)를 임베딩 대상에서 제외하는지 검증한다.
+ * {@link EgovEnhancedDocumentTransformer}가 청크 분할 결과를 길이와 무관하게 그대로
+ * 유지하는지 검증한다.
  *
- * <p>이런 청크는 검색 가치가 없을 뿐 아니라, 벡터가 좁고 뾰족해서 질의어와 단어 몇 개만
- * 겹쳐도 부적절하게 높은 유사도로 잡히는 부작용이 있다(예: "휴가 신청-1" 같은 페이지
- * 캡션이 "휴가 결재선" 질의에서 진짜 답이 담긴 긴 청크보다 더 높은 순위로 잡힘).</p>
+ * <p>이전에는 이 트랜스포머가 지나치게 짧은 청크(예: PDF 페이지가 캡션 한 줄뿐인 경우)를
+ * 색인 단계에서 미리 제외했으나, 그렇게 하면 그 청크가 실제로 정답인 질의에서도 영영
+ * 검색되지 않는 문제가 있었다. 그래서 길이 필터링은 검색(RAG) 단계로 옮겼다 — 자세한
+ * 내용은 {@link com.example.chat.config.EgovLengthFilteringContentRetriever} 참고.</p>
  */
 class EgovEnhancedDocumentTransformerTest {
 
     private final EgovEnhancedDocumentTransformer transformer =
-            new EgovEnhancedDocumentTransformer(4000, 350, 50);
+            new EgovEnhancedDocumentTransformer(4000, 350);
 
     private Document doc(String id, String text) {
         return Document.from(text, Metadata.from("id", id));
     }
 
     @Test
-    @DisplayName("최소 길이(50자) 미만 청크는 결과에서 제외된다")
-    void filtersOutChunksShorterThanMinLength() {
+    @DisplayName("짧은 청크도 색인 단계에서는 제외되지 않고 그대로 유지된다")
+    void keepsShortChunks() {
         Document tiny = doc("tiny", "휴가 신청-1");
-        Document normal = doc("normal", "이 문서는 충분히 긴 본문을 가지고 있어 임베딩 대상에서 제외되지 않아야 한다는 것을 확인하기 위한 샘플 텍스트입니다.");
+        Document normal = doc("normal", "이 문서는 충분히 긴 본문을 가지고 있는 샘플 텍스트입니다.");
 
         List<Document> result = transformer.transformAll(List.of(tiny, normal));
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).metadata().getString("id")).isEqualTo("normal");
+        assertThat(result).hasSize(2);
+        assertThat(result.stream().map(d -> d.metadata().getString("id")))
+                .containsExactlyInAnyOrder("tiny", "normal");
     }
 
     @Test
-    @DisplayName("최소 길이 이상 청크는 그대로 유지된다")
-    void keepsChunksAtOrAboveMinLength() {
-        String exactly50Chars = "가".repeat(50);
-        Document doc = doc("exact", exactly50Chars);
-
-        List<Document> result = transformer.transformAll(List.of(doc));
-
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
-    @DisplayName("모든 청크가 너무 짧으면 빈 리스트를 반환한다")
-    void returnsEmptyWhenAllChunksTooShort() {
+    @DisplayName("모든 청크가 짧아도 결과가 비지 않는다")
+    void doesNotDropAllShortChunks() {
         Document tiny1 = doc("tiny1", "출장 신청");
         Document tiny2 = doc("tiny2", "휴가 신청-2");
 
         List<Document> result = transformer.transformAll(List.of(tiny1, tiny2));
 
-        assertThat(result).isEmpty();
+        assertThat(result).hasSize(2);
     }
 }

@@ -78,7 +78,8 @@ class EgovHybridLexicalSearchDbTest {
     private EgovHybridContentRetriever retriever(double threshold) {
         // dense 채널은 빈 결과 → 융합 결과는 lexical 채널 그대로. 실제 lexical SQL 경로를 실행한다.
         ContentRetriever emptyDense = q -> List.of();
-        return new EgovHybridContentRetriever(emptyDense, jdbc, txManager, TABLE, 1.0, 1.0, threshold, 3);
+        // 길이 필터/오버페치는 이 테스트의 관심사가 아니므로 비활성화(0자 이상, 배수 1)로 둔다.
+        return new EgovHybridContentRetriever(emptyDense, jdbc, txManager, TABLE, 1.0, 1.0, threshold, 3, 0, 1);
     }
 
     private static List<String> ids(List<Content> contents) {

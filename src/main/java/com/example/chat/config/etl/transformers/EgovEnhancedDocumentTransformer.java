@@ -22,12 +22,10 @@ import java.util.stream.Collectors;
 public class EgovEnhancedDocumentTransformer implements DocumentTransformer {
 
     private final DocumentSplitter documentSplitter;
-    private final int minChunkLengthToEmbed;
 
     public EgovEnhancedDocumentTransformer(
             @Value("${document.chunk-size}") int chunkSize,
-            @Value("${document.min-chunk-size-chars}") int minChunkSizeChars,
-            @Value("${document.min-chunk-length-to-embed:50}") int minChunkLengthToEmbed) {
+            @Value("${document.min-chunk-size-chars}") int minChunkSizeChars) {
 
         // LangChain4j의 DocumentSplitter 생성
         // 토큰 기반 분할 (최대 토큰 수, 오버랩)
@@ -35,10 +33,9 @@ public class EgovEnhancedDocumentTransformer implements DocumentTransformer {
                 chunkSize, // 최대 토큰 수
                 Math.max(chunkSize / 10, 50) // 오버랩 (청크 크기의 10%)
         );
-        this.minChunkLengthToEmbed = minChunkLengthToEmbed;
 
-        log.info("EnhancedDocumentTransformer 초기화 - chunkSize: {}, minChunkSize: {}, minChunkLengthToEmbed: {}",
-                chunkSize, minChunkSizeChars, minChunkLengthToEmbed);
+        log.info("EnhancedDocumentTransformer 초기화 - chunkSize: {}, minChunkSize: {}",
+                chunkSize, minChunkSizeChars);
     }
 
     @Override
@@ -75,26 +72,14 @@ public class EgovEnhancedDocumentTransformer implements DocumentTransformer {
         }
         log.info("문서 분할 완료: {}개 청크 생성", splitDocs.size());
 
-        // 너무 짧은 청크(예: PDF 페이지가 사실상 캡션 한 줄뿐인 경우) 는 검색 가치가
-        // 없을 뿐 아니라, 벡터가 좁고 뾰족해서 키워드만 겹치면 엉뚱하게 높은 유사도로
-        // 잡히는 부작용이 있다. 임베딩 대상에서 제외한다.
-        List<Document> filteredDocs = new ArrayList<>();
-        int skipped = 0;
-        for (Document chunk : splitDocs) {
-            String content = chunk.text();
-            if (content == null || content.trim().length() < minChunkLengthToEmbed) {
-                skipped++;
-                continue;
-            }
-            filteredDocs.add(chunk);
-        }
-        if (skipped > 0) {
-            log.info("최소 길이({}자) 미만 청크 {}개를 임베딩 대상에서 제외했습니다.", minChunkLengthToEmbed, skipped);
-        }
+        // 너무 짧은 청크(예: PDF 페이지가 사실상 캡션 한 줄뿐인 경우)는 여기서 미리 빼지
+        // 않는다 — 색인 단계에서 제외하면 그 청크가 실제로 정답인 질의에서도 영영 검색되지
+        // 않는다. 대신 검색(RAG) 단계에서 top-k보다 넉넉히 가져온 뒤 길이로 걸러내고 최종
+        // top-k로 자른다 (EgovRagConfig의 rag.retrieval.overfetch-multiplier 참고).
 
         // 분할된 청크 크기 로깅
-        for (int i = 0; i < filteredDocs.size(); i++) {
-            Document chunk = filteredDocs.get(i);
+        for (int i = 0; i < splitDocs.size(); i++) {
+            Document chunk = splitDocs.get(i);
             String content = chunk.text();
             if (content != null) {
                 int estimatedTokens = content.length() / 4;
@@ -103,6 +88,6 @@ public class EgovEnhancedDocumentTransformer implements DocumentTransformer {
             }
         }
 
-        return filteredDocs;
+        return splitDocs;
     }
 }

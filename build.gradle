@@ -111,6 +111,9 @@ dependencies {
     // Apache Commons
     implementation 'commons-codec:commons-codec'
 
+    // CSV 문서 파싱 (따옴표/내부 콤마 등 RFC 4180 처리)
+    implementation 'org.apache.commons:commons-csv:1.11.0'
+
     // HWP 문서 파싱 (공공 행정문서 지원)
     implementation 'kr.dogfoot:hwplib:1.1.9'
     // HWPX 문서 파싱

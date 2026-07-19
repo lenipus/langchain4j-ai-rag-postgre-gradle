@@ -37,6 +37,11 @@ class EgovHybridContentRetrieverTest {
     // lexical word_similarity 임계값 테스트값(프로덕션 기본 0.30과 무관하게 융합 로직만 검증).
     private static final double LEXICAL_THRESHOLD = 0.30;
 
+    // 길이 필터/오버페치는 이 테스트 클래스의 관심사가 아니므로, LIMIT 바인드값이
+    // topK 그대로 유지되도록(topK * 1) 필터링도 비활성(0자 이상)으로 둔다.
+    private static final int MIN_CHUNK_LENGTH = 0;
+    private static final int OVERFETCH_MULTIPLIER = 1;
+
     /**
      * 통과용 트랜잭션 매니저. mock 이므로 getTransaction 은 null 을 반환하고 commit 은 no-op 이라
      * {@code transactionTemplate.execute(...)} 콜백이 그대로 실행된다(실제 DB·트랜잭션 없음).
@@ -55,8 +60,8 @@ class EgovHybridContentRetrieverTest {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private List<Content> stubLexical(JdbcTemplate jdbc, List<Content> lexicalResults) {
-        // query(String sql, RowMapper, Object... args) - 가변인자 3개(queryText, queryText, topK)
-        when(jdbc.query(anyString(), any(RowMapper.class), anyString(), anyString(), anyInt()))
+        // query(String sql, RowMapper, Object... args) - 가변인자 4개(queryText, minChunkLength, queryText, limit)
+        when(jdbc.query(anyString(), any(RowMapper.class), anyString(), anyInt(), anyString(), anyInt()))
                 .thenReturn((List) lexicalResults);
         return lexicalResults;
     }
@@ -79,7 +84,7 @@ class EgovHybridContentRetrieverTest {
                 content("L1", "lexical only one")));
 
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
 
         List<Content> result = retriever.retrieve(Query.from("shared"));
 
@@ -100,11 +105,11 @@ class EgovHybridContentRetrieverTest {
                 content("D2", "beta"));
         when(dense.retrieve(any(Query.class))).thenReturn(denseResult);
 
-        when(jdbc.query(anyString(), any(RowMapper.class), anyString(), anyString(), anyInt()))
+        when(jdbc.query(anyString(), any(RowMapper.class), anyString(), anyInt(), anyString(), anyInt()))
                 .thenThrow(new RuntimeException("relation does not exist"));
 
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
 
         List<Content> result = retriever.retrieve(Query.from("alpha"));
 
@@ -124,7 +129,7 @@ class EgovHybridContentRetrieverTest {
 
         // lexical 가중 3배 -> LEX_TOP(3/60) > DENSE_TOP(1/60)
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 3.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 3.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
 
         List<Content> result = retriever.retrieve(Query.from("top"));
 
@@ -144,7 +149,7 @@ class EgovHybridContentRetrieverTest {
                 content(null, "same text body")));
 
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
 
         List<Content> result = retriever.retrieve(Query.from("same"));
 
@@ -169,7 +174,7 @@ class EgovHybridContentRetrieverTest {
                 content("SAME", "shared body")));
 
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
 
         List<Content> result = retriever.retrieve(Query.from("shared"));
 
@@ -195,14 +200,14 @@ class EgovHybridContentRetrieverTest {
         when(rs.getString("text")).thenReturn("numeric id body");
         when(rs.getString("doc_id")).thenReturn("42");
 
-        when(jdbc.query(anyString(), any(RowMapper.class), anyString(), anyString(), anyInt()))
+        when(jdbc.query(anyString(), any(RowMapper.class), anyString(), anyInt(), anyString(), anyInt()))
                 .thenAnswer(invocation -> {
                     RowMapper<Content> mapper = invocation.getArgument(1);
                     return List.of(mapper.mapRow(rs, 0));
                 });
 
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
 
         List<Content> result = retriever.retrieve(Query.from("numeric"));
 
@@ -220,15 +225,17 @@ class EgovHybridContentRetrieverTest {
         stubLexical(jdbc, List.of(content("L1", "lexical body")));
 
         EgovHybridContentRetriever retriever =
-                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3);
+                new EgovHybridContentRetriever(dense, jdbc, passthroughTxManager(), TABLE, 1.0, 1.0, LEXICAL_THRESHOLD, 3, MIN_CHUNK_LENGTH, OVERFETCH_MULTIPLIER);
         retriever.retrieve(Query.from("리액티브 레디스"));
 
-        // 1) 게이트 쿼리: %> 연산자 + word_similarity(?, text) 방향(대칭 similarity/% 아님) + LIMIT 바인드 순서.
+        // 1) 게이트 쿼리: %> 연산자 + 길이 필터 + word_similarity(?, text) 방향(대칭 similarity/% 아님)
+        //    + LIMIT 바인드 순서(queryText, minChunkLength, queryText, limit).
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), any(RowMapper.class),
-                eq("리액티브 레디스"), eq("리액티브 레디스"), eq(3));
+                eq("리액티브 레디스"), eq(MIN_CHUNK_LENGTH), eq("리액티브 레디스"), eq(3));
         assertThat(sql.getValue())
                 .contains(" %> ?")
+                .contains("length(trim(text)) >= ?")
                 .contains("word_similarity(?, text)")
                 .doesNotContain("similarity(text,"); // 대칭 similarity 회귀 방지
 

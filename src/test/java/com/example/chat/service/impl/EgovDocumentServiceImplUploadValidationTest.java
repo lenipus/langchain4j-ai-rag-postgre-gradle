@@ -25,9 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EgovDocumentServiceImplUploadValidationTest {
 
     // 검증 거부 분기만 대상으로 하므로 모든 협력 객체는 null로 둔다. 인자 수는
-    // EgovDocumentServiceImpl 생성자(리더 7 + 변환 2 + writer + repository + executor = 12)와 일치.
+    // EgovDocumentServiceImpl 생성자(scanner 1 + 변환 2 + writer + repository + executor = 6)와 일치.
     private final EgovDocumentServiceImpl service =
-            new EgovDocumentServiceImpl(null, null, null, null, null, null, null, null, null, null, null, null);
+            new EgovDocumentServiceImpl(null, null, null, null, null, null);
 
     {
         // @Value로 주입되는 용량 제한값/허용 확장자는 Spring 컨텍스트 밖에서는 채워지지 않으므로 수동 주입한다.

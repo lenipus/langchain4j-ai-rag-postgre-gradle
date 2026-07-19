@@ -7,13 +7,11 @@ import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -27,55 +25,24 @@ import java.util.regex.Pattern;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class EgovJsonReader {
+public class EgovJsonReader implements EgovDocumentReader {
 
     private final DocumentIdUtil documentIdUtil;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    @Value("${document.json-path:#{null}}")
-    private String jsonDocumentPath;
 
     private static final Pattern TAG_BR = Pattern.compile("(?i)<br\\s*/?>");
     private static final Pattern TAG_ROW_END = Pattern.compile("(?i)</tr>");
     private static final Pattern TAG_ANY = Pattern.compile("<[^>]*>");
 
-    public List<Document> read() {
-        if (jsonDocumentPath == null || jsonDocumentPath.isBlank()) {
-            log.info("JSON 문서 경로가 설정되지 않아 건너뜁니다.");
-            return List.of();
-        }
+    @Override
+    public Set<String> supportedExtensions() {
+        return Set.of("json");
+    }
 
-        log.info("JSON 문서 읽기 시작 - 경로: {}", jsonDocumentPath);
-
-        try {
-            PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-            Resource[] resources = resolver.getResources(jsonDocumentPath);
-
-            if (resources.length == 0) {
-                log.warn("JSON 파일을 찾을 수 없습니다: {}", jsonDocumentPath);
-                return List.of();
-            }
-
-            log.info("{}개의 JSON 파일을 찾았습니다.", resources.length);
-
-            List<Document> documents = new ArrayList<>();
-            for (Resource resource : resources) {
-                try {
-                    Document doc = parseJsonDocument(resource);
-                    if (doc != null) {
-                        documents.add(doc);
-                    }
-                } catch (Exception e) {
-                    log.error("JSON 파일 '{}' 처리 중 오류 발생: {}", resource.getFilename(), e.getMessage());
-                }
-            }
-
-            log.info("총 {}개의 JSON 문서를 읽었습니다.", documents.size());
-            return documents;
-        } catch (Exception e) {
-            log.error("JSON 문서 읽기 중 오류 발생", e);
-            return List.of();
-        }
+    @Override
+    public List<Document> parse(Resource resource) throws Exception {
+        Document document = parseJsonDocument(resource);
+        return document == null ? List.of() : List.of(document);
     }
 
     private Document parseJsonDocument(Resource resource) throws Exception {
