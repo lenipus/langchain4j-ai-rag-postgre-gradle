@@ -135,15 +135,32 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
                 totalCount.set(transformedDocuments.size());
                 processedCount.set(0);
 
-                // 5단계: 벡터 저장소에 저장 (배치 완료마다 진행 개수 갱신)
+                // 5+6단계: 원본 문서 단위로 청크를 저장하고, 그 문서의 청크 저장이 끝나는
+                // 즉시 해시를 등록한다. 예전에는 전체 문서의 임베딩이 다 끝난 뒤 한꺼번에
+                // 해시를 등록했는데, 그러면 중간에 프로세스가 죽었을 때 이미 임베딩까지 끝난
+                // 문서조차 해시가 없어 다음 실행에서 처음부터 다시 처리되고(벡터 저장소에
+                // 같은 내용이 중복 삽입될 위험도 있다), 문서 단위로 나눠 즉시 커밋해 이를 막는다.
+                // 분할 후에도 청크의 metadata.id는 원본 문서와 동일하게 유지되므로
+                // (index만 청크별로 다름) 이 값으로 청크를 원본 문서에 재귀속시킬 수 있다.
                 log.info("벡터 저장소 저장 시작");
-                egovVectorStoreWriter.write(transformedDocuments, processedCount::set);
-                log.info("벡터 저장소 저장 완료");
+                Map<String, List<Document>> chunksByDocId = transformedDocuments.stream()
+                        .collect(Collectors.groupingBy(d -> d.metadata().getString("id"),
+                                LinkedHashMap::new, Collectors.toList()));
 
-                // 6단계: 처리된 문서 해시 저장
-                for (Document document : changedDocuments) {
-                    saveDocumentHash(document);
+                int storedChunks = 0;
+                for (Document originalDocument : changedDocuments) {
+                    String docId = originalDocument.metadata().getString("id");
+                    List<Document> docChunks = chunksByDocId.getOrDefault(docId, List.of());
+                    if (!docChunks.isEmpty()) {
+                        egovVectorStoreWriter.write(docChunks);
+                        storedChunks += docChunks.size();
+                        processedCount.set(storedChunks);
+                    }
+                    // 청크가 하나도 없어도(정규화 후 내용이 비어버린 경우 등) 해시는 등록해
+                    // 다음 실행에서 같은 문서를 계속 "변경됨"으로 재시도하지 않게 한다.
+                    saveDocumentHash(originalDocument);
                 }
+                log.info("벡터 저장소 저장 완료");
 
                 processedCount.set(transformedDocuments.size());
                 log.info("문서 처리 완료: {}개 문서 처리됨 (원본: {}개 → 청크: {}개)",

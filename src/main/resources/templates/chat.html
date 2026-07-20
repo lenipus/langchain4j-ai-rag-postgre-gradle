@@ -6,354 +6,7 @@
     <title>LangChain4j RAG 채팅</title>
     <script src="/js/marked.min.js"></script>
     <script src="/js/purify.min.js"></script>
-    <style>
-        body {
-            font-family: 'Noto Sans KR', Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f5f5f5;
-            color: #333;
-            display: flex;
-            height: 100vh;
-        }
-        .sidebar {
-            width: 280px;
-            background-color: #2c3e50;
-            color: white;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-        }
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background-color: white;
-            padding: 20px;
-            min-width: 0;
-            overflow-x: hidden;
-        }
-        .container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            max-width: none;
-            margin: 0;
-            border-radius: 0;
-            box-shadow: none;
-            padding: 0;
-        }
-        h1 {
-            color: #2c3e50;
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #ddd;
-        }
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border: 1px solid transparent;
-            border-bottom: none;
-            border-radius: 5px 5px 0 0;
-            margin-right: 5px;
-        }
-        .tab.active {
-            background-color: #fff;
-            border-color: #ddd;
-            border-bottom-color: white;
-            margin-bottom: -1px;
-            font-weight: bold;
-        }
-        .chat-container {
-            height: 720px;
-            overflow-y: auto;
-            overflow-x: hidden;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 10px;
-            margin-bottom: 15px;
-            background-color: #f9f9f9;
-        }
-        .message {
-            margin-bottom: 10px;
-            padding: 8px 12px;
-            border-radius: 5px;
-            max-width: 80%;
-            word-wrap: break-word;
-            word-break: break-word;
-            overflow-wrap: break-word;
-            white-space: pre-wrap;
-        }
-        .user-message {
-            background-color: #dcf8c6;
-            margin-left: auto;
-            text-align: right;
-        }
-        .ai-message {
-            background-color: #f0f0f0;
-        }
-        .ai-message p {
-            white-space: pre-wrap;
-            margin: 0.5em 0;
-        }
-        .ai-message * {
-            white-space: normal;
-        }
-        .ai-message pre {
-            white-space: pre-wrap;
-            overflow-wrap: break-word;
-        }
-        .ai-message code {
-            white-space: pre-wrap;
-            overflow-wrap: break-word;
-        }
-        .input-container {
-            display: flex;
-            margin-top: 10px;
-        }
-        .message-input {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 16px;
-        }
-        .send-button {
-            padding: 10px 20px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            margin-left: 10px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        .send-button:hover {
-            background-color: #45a049;
-        }
-        .send-button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        .loading {
-            text-align: center;
-            margin: 10px 0;
-            color: #666;
-        }
-        .admin-panel {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #34495e;
-            border-radius: 5px;
-            background-color: #34495e;
-            color: white;
-        }
-        .admin-panel h3 {
-            color: #ecf0f1;
-            margin: 0 0 15px 0;
-            font-size: 14px;
-            font-weight: bold;
-        }
-        .admin-button {
-            padding: 8px 12px;
-            background-color: #3498db;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin: 5px 5px 5px 0;
-            font-size: 12px;
-            width: 100%;
-            display: block;
-        }
-        .admin-button:hover {
-            background-color: #2980b9;
-        }
-        .admin-button:disabled {
-            background-color: #7f8c8d;
-            cursor: not-allowed;
-        }
-        .document-status {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 5px;
-            display: none;
-            font-size: 12px;
-        }
-        .document-status.processing {
-            background-color: #f39c12;
-            border: 1px solid #e67e22;
-            color: white;
-        }
-        .document-status.completed {
-            background-color: #27ae60;
-            border: 1px solid #229954;
-            color: white;
-        }
-        .document-status.error {
-            background-color: #e74c3c;
-            border: 1px solid #c0392b;
-            color: white;
-        }
-        .progress-container {
-            margin-top: 10px;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background-color: #e9ecef;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            background-color: #007bff;
-            transition: width 0.3s ease;
-            width: 0%;
-        }
-        .progress-text {
-            margin-top: 5px;
-            font-size: 12px;
-            color: #666;
-        }
-        .model-selection {
-            margin: 15px 0;
-            padding: 15px;
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .model-selection label {
-            font-weight: bold;
-            color: #495057;
-            margin: 0;
-        }
-        .model-select {
-            padding: 8px 12px;
-            border: 1px solid #ced4da;
-            border-radius: 4px;
-            background-color: white;
-            font-size: 14px;
-            min-width: 200px;
-        }
-        .model-select:focus {
-            outline: none;
-            border-color: #80bdff;
-            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-        }
-        .model-status {
-            font-size: 12px;
-            color: #6c757d;
-        }
-        .model-status.success {
-            color: #28a745;
-        }
-        .model-status.error {
-            color: #dc3545;
-        }
-        .model-status.warning {
-            color: #ffc107;
-        }
-        .new-chat-btn {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 12px 16px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .new-chat-btn:hover {
-            background-color: #2980b9;
-        }
-        .sessions-header {
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: #bdc3c7;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .sessions-list {
-            flex: 1;
-            overflow-y: auto;
-        }
-        .session-item {
-            padding: 12px;
-            margin-bottom: 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            border: 1px solid transparent;
-        }
-        .session-item:hover {
-            background-color: #34495e;
-        }
-        .session-item.active {
-            background-color: #3498db;
-            border-color: #2980b9;
-        }
-        .session-title {
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 4px;
-            word-wrap: break-word;
-            line-height: 1.3;
-        }
-        .session-time {
-            font-size: 12px;
-            color: #95a5a6;
-        }
-        .session-item.active .session-time {
-            color: #ecf0f1;
-        }
-        .session-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-        .session-item:hover .session-actions,
-        .session-item.active .session-actions {
-            opacity: 1;
-        }
-        .session-action-btn {
-            background: none;
-            border: 1px solid #7f8c8d;
-            color: #bdc3c7;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            cursor: pointer;
-        }
-        .session-action-btn:hover {
-            background-color: #e74c3c;
-            border-color: #c0392b;
-            color: white;
-        }
-        .current-session-title {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 20px;
-            color: #2c3e50;
-            border-bottom: 1px solid #ecf0f1;
-            padding-bottom: 10px;
-        }
-    </style>
+    <link rel="stylesheet" href="/css/chat.css">
 </head>
 <body>
     <!-- 사이드바 -->
@@ -893,6 +546,27 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        // 응답이 오기 전까지(RAG는 문서검색+LLM추론으로 수십 초까지 걸릴 수 있음) 그냥
+        // '...' 만 떠 있으면 멈춘 것처럼 보이므로, 점 애니메이션 + 순환 문구로 진행 중임을 보여준다.
+        function startThinkingIndicator(container, mode) {
+            const phrases = mode === 'rag'
+                ? ['질문을 이해하고 있어요...', '관련 문서를 검색하고 있어요...', '검색된 내용을 검토하고 있어요...', '답변을 작성하고 있어요...', '조금만 더 기다려주세요...']
+                : ['질문을 이해하고 있어요...', '답변을 생각하고 있어요...', '답변을 작성하고 있어요...', '조금만 더 기다려주세요...'];
+
+            container.innerHTML = '<div class="thinking-indicator">' +
+                '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
+                '<span class="thinking-text">' + phrases[0] + '</span></div>';
+
+            let index = 0;
+            return setInterval(() => {
+                index = (index + 1) % phrases.length;
+                const textEl = container.querySelector('.thinking-text');
+                if (textEl) {
+                    textEl.textContent = phrases[index];
+                }
+            }, 4000);
+        }
+
         function sendMessage() {
             const input = document.getElementById('message-input');
             const message = input.value.trim();
@@ -924,8 +598,8 @@
             aiMessageDiv.classList.add('message', 'ai-message');
             document.getElementById('chat-container').appendChild(aiMessageDiv);
 
-            // 로딩 표시
-            aiMessageDiv.textContent = '...';
+            // 로딩 표시 (첫 토큰이 올 때까지 진행 중임을 알려주는 애니메이션)
+            let thinkingIntervalId = startThinkingIndicator(aiMessageDiv, currentMode);
 
             // 스트리밍 API 엔드포인트 결정
             const endpoint = currentMode === 'rag' ? '/ai/rag/stream' : '/ai/simple/stream';
@@ -953,6 +627,11 @@
             // 메시지 수신 시 처리
             let tokenCount = 0;
             eventSource.onmessage = function(event) {
+                // 첫 토큰이 도착하면 생각 중 표시를 멈춘다(이후 innerHTML이 실제 응답으로 덮어써짐)
+                if (thinkingIntervalId) {
+                    clearInterval(thinkingIntervalId);
+                    thinkingIntervalId = null;
+                }
                 try {
                     // JSON 파싱하여 토큰 추출
                     const data = JSON.parse(event.data);
@@ -1009,6 +688,11 @@
                 console.error('EventSource 상태:', eventSource.readyState);
                 console.error('요청 URL:', eventSource.url);
 
+                if (thinkingIntervalId) {
+                    clearInterval(thinkingIntervalId);
+                    thinkingIntervalId = null;
+                }
+
                 eventSource.close();
 
                 // 응답이 비어있는 경우 오류 메시지 표시
@@ -1027,6 +711,11 @@
 
             // 스트림 완료 시 처리
             eventSource.addEventListener('complete', function() {
+                if (thinkingIntervalId) {
+                    clearInterval(thinkingIntervalId);
+                    thinkingIntervalId = null;
+                }
+
                 eventSource.close();
 
                 // 버튼 활성화
