@@ -131,8 +131,10 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
                 List<Document> transformedDocuments = egovEnhancedDocumentTransformer.transformAll(normalizedDocuments);
                 log.info("문서 변환 완료: {}개 청크 생성", transformedDocuments.size());
 
-                // 진행률 표시 기준을 청크 개수로 맞춤 (처리 단위가 청크이므로)
-                totalCount.set(transformedDocuments.size());
+                // 진행률 표시 기준을 파일(원본 문서) 개수로 맞춘다. 청크 수는 사용자에게
+                // "전체 몇 개 중 몇 번째"라는 감을 주지 못하므로(문서마다 청크 수가 다름) 파일
+                // 단위가 화면·로그 모두에 더 의미 있다.
+                totalCount.set(changedDocuments.size());
                 processedCount.set(0);
 
                 // 5+6단계: 원본 문서 단위로 청크를 저장하고, 그 문서의 청크 저장이 끝나는
@@ -147,26 +149,31 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
                         .collect(Collectors.groupingBy(d -> d.metadata().getString("id"),
                                 LinkedHashMap::new, Collectors.toList()));
 
-                int storedChunks = 0;
+                int fileTotal = changedDocuments.size();
+                int fileIndex = 0;
                 for (Document originalDocument : changedDocuments) {
+                    fileIndex++;
                     String docId = originalDocument.metadata().getString("id");
+                    String fileName = originalDocument.metadata().getString("file_name");
                     List<Document> docChunks = chunksByDocId.getOrDefault(docId, List.of());
                     if (!docChunks.isEmpty()) {
                         egovVectorStoreWriter.write(docChunks);
-                        storedChunks += docChunks.size();
-                        processedCount.set(storedChunks);
                     }
                     // 청크가 하나도 없어도(정규화 후 내용이 비어버린 경우 등) 해시는 등록해
                     // 다음 실행에서 같은 문서를 계속 "변경됨"으로 재시도하지 않게 한다.
                     saveDocumentHash(originalDocument);
+
+                    processedCount.set(fileIndex);
+                    log.info("[{}/{}] {} - 해시 저장 완료 ({}개 청크)",
+                            fileIndex, fileTotal, fileName, docChunks.size());
                 }
                 log.info("벡터 저장소 저장 완료");
 
-                processedCount.set(transformedDocuments.size());
-                log.info("문서 처리 완료: {}개 문서 처리됨 (원본: {}개 → 청크: {}개)",
-                        transformedDocuments.size(), changedDocuments.size(), transformedDocuments.size());
+                processedCount.set(changedDocuments.size());
+                log.info("문서 처리 완료: {}개 파일 처리됨 (청크: {}개 생성)",
+                        changedDocuments.size(), transformedDocuments.size());
 
-                return transformedDocuments.size();
+                return changedDocuments.size();
 
             } catch (Exception e) {
                 log.error("문서 처리 중 오류 발생", e);
@@ -272,7 +279,7 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         }
 
         // 비동기 완료 후 로그 처리
-        future.thenAccept(count -> log.info("재인덱싱 완료: {}개 청크 처리됨", count))
+        future.thenAccept(count -> log.info("재인덱싱 완료: {}개 파일 처리됨", count))
                 .exceptionally(throwable -> {
                     log.error("재인덱싱 중 오류 발생", throwable);
                     return null;
@@ -303,7 +310,7 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         isProcessing.set(false);
 
         CompletableFuture<Integer> future = this.loadDocumentsAsync();
-        future.thenAccept(count -> log.info("인덱스 초기화 후 재인덱싱 완료: {}개 청크 처리됨", count))
+        future.thenAccept(count -> log.info("인덱스 초기화 후 재인덱싱 완료: {}개 파일 처리됨", count))
                 .exceptionally(throwable -> {
                     log.error("인덱스 초기화 후 재인덱싱 중 오류 발생", throwable);
                     return null;
@@ -395,7 +402,6 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
             String newHash = DocumentHashUtil.calculateHash(content);
             DocumentHashEntity entity = new DocumentHashEntity(docId, newHash);
             documentHashRepository.save(entity);
-            log.debug("문서 '{}' 해시 저장 완료: {}", docId, newHash);
         }
     }
 }

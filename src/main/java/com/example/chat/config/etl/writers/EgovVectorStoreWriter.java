@@ -47,20 +47,13 @@ public class EgovVectorStoreWriter {
      * 배치가 끝날 때마다 누적 저장 개수를 콜백으로 알린다(진행률 표시용).
      */
     public void write(List<Document> documents, IntConsumer progressCallback) {
-        log.info("벡터 저장소에 {}개 문서 저장 시작", documents.size());
-
         if (documents.isEmpty()) {
             log.warn("저장할 문서가 없습니다.");
             return;
         }
 
-        // 문서 정보 로깅
-        for (int i = 0; i < Math.min(documents.size(), 3); i++) {
-            Document doc = documents.get(i);
-            log.debug("문서 {}: ID={}, 크기={}바이트",
-                    i, doc.metadata().getString("id"), doc.text().length());
-        }
-
+        // 호출부(EgovDocumentServiceImpl)가 파일 단위로 이미 진행 상황을 로그로 남기므로,
+        // 여기서는 배치별 상세 로그를 남기지 않고 실패 시에만 로그를 남긴다.
         try {
             int total = documents.size();
             int stored = 0;
@@ -81,10 +74,7 @@ public class EgovVectorStoreWriter {
 
                 stored += batch.size();
                 progressCallback.accept(stored);
-                log.info("벡터 저장소 저장 진행률: {}/{}", stored, total);
             }
-
-            log.info("벡터 저장소에 {}개 문서 저장 완료", documents.size());
         } catch (Exception e) {
             log.error("벡터 저장소 저장 중 오류 발생", e);
             throw new RuntimeException("벡터 저장소 저장 중 오류 발생", e);
