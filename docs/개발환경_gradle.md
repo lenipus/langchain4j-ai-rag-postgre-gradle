@@ -306,7 +306,7 @@ VSCode의 `vscjava.vscode-java-pack`(Extension Pack for Java)에는 **"Gradle fo
    | `OLLAMA_CHAT_API_TYPE` | `ollama` | 값은 `ollama`(네이티브 API) \| `openai`(OpenAI 호환 API, `base-url`에 `/v1` 포함 필요) 두 가지. 네이티브 Ollama면 기본값 유지 |
    | `OLLAMA_CHAT_NUM_CTX` | `0`(Ollama 기본값 사용) | 컨텍스트 윈도우(`num_ctx`) 크기를 조정할 때 (`api-type=ollama`일 때만 적용) |
    | `OLLAMA_EMBEDDING_BASE_URL` | `http://localhost:31434` | 임베딩 서버를 채팅과 다르게 분리할 때 |
-   | `OLLAMA_EMBEDDING_MODEL_NAME` | `embeddinggemma:300m` | 다른 임베딩 모델 사용 시 |
+   | `EMBEDDING_PROFILE` | `bgem3` | 임베딩 모델 프로필 전환(`gemma` \| `bgem3`). `model-name`과 PGVector `table-name`/`dimension`/`hash-table-name`이 이 값 하나로 한꺼번에 같이 바뀐다 (수동으로 따로 안 맞춰도 됨) |
    | `OLLAMA_EMBEDDING_API_KEY` | (없음) | OpenAI 호환 엔드포인트 등 인증이 필요한 서버 사용 시 |
    | `OLLAMA_EMBEDDING_API_TYPE` | `ollama` | 값은 `ollama` \| `openai` 두 가지 (의미는 `OLLAMA_CHAT_API_TYPE`과 동일) |
    | `DOCUMENT_UPLOAD_PATH` | `/app/rag/upload` | **항상 자신의 로컬 경로로 재설정 필요** |
@@ -531,9 +531,10 @@ VSCode의 `vscjava.vscode-java-pack`(Extension Pack for Java)에는 **"Gradle fo
    >     embedding-model:
    >       base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
    >       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # ollama(네이티브) | openai(OpenAI 호환)
-   >       model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}
+   >       model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
    > ```
    > "ONNX → Ollama"라는 전환 방향 자체는 동일하고, 그 설정을 읽어 `EmbeddingModel` 빈을 만드는 코드가 Spring AI 자동 구성에서 `EgovLangChain4jConfig.java`의 수동 `@Bean`으로 바뀐 것뿐이다.
+   > `model-name`은 이제 `OLLAMA_EMBEDDING_MODEL_NAME`이 아니라 `EMBEDDING_PROFILE`(`gemma` \| `bgem3`)로 전환한다 — PGVector `table-name`/`dimension`/`hash-table-name`도 같은 값을 참조해서 함께 바뀌므로, 모델만 바꾸고 테이블 설정을 안 바꿔서 어긋나는 실수를 막기 위함이다.
 
    이렇게만 설정하면 Spring AI가 자동으로 `EmbeddingModel` 빈을 만들어준다 — 별도 Java 설정 코드 불필요. 다만 임베딩을 원격 Ollama로 보내면 청크의 **실제 텍스트 내용이 네트워크를 통해 전송**된다는 점은 유의한다 (RAG 특성상 검색된 문서 내용은 이미 LLM 프롬프트로도 전달되므로 새로운 노출 유형은 아니지만, 진짜 원격 서버로 옮길 땐 신뢰 가능한 네트워크나 리버스 프록시 HTTPS 적용을 권장).
 

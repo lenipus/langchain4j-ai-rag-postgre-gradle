@@ -9,12 +9,16 @@ import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
 /**
@@ -28,7 +32,12 @@ class EgovVectorStoreWriterTest {
     private final EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
     @SuppressWarnings("unchecked")
     private final EmbeddingStore<TextSegment> embeddingStore = mock(EmbeddingStore.class);
-    private final EgovVectorStoreWriter writer = new EgovVectorStoreWriter(embeddingStore, embeddingModel);
+    private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+    private final EgovVectorStoreWriter writer = new EgovVectorStoreWriter(embeddingStore, embeddingModel, jdbcTemplate);
+
+    {
+        ReflectionTestUtils.setField(writer, "tableName", "document_embeddings");
+    }
 
     private Document doc(String id, String text) {
         Metadata metadata = Metadata.from("id", id);
@@ -80,5 +89,40 @@ class EgovVectorStoreWriterTest {
         writer.write(documents, progress::add);
 
         assertThat(progress).containsExactly(5, 7);
+    }
+
+    @Test
+    @DisplayName("deleteByDocIds는 각 doc_id를 metadata::jsonb ->> 'id' 조건으로 배치 삭제하고, 삭제된 행 수 합계를 반환한다")
+    @SuppressWarnings("unchecked")
+    void deleteByDocIdsBatchDeletesByMetadataId() {
+        when(jdbcTemplate.batchUpdate(anyString(), anyList())).thenReturn(new int[] { 1, 1 });
+
+        int deleted = writer.deleteByDocIds(List.of("doc-a", "doc-b"));
+
+        assertThat(deleted).isEqualTo(2);
+
+        ArgumentCaptor<List<Object[]>> captor = ArgumentCaptor.forClass(List.class);
+        verify(jdbcTemplate).batchUpdate(contains("metadata::jsonb ->> 'id'"), captor.capture());
+        List<Object[]> batchArgs = captor.getValue();
+        assertThat(batchArgs).hasSize(2);
+        assertThat(batchArgs.get(0)).containsExactly("doc-a");
+        assertThat(batchArgs.get(1)).containsExactly("doc-b");
+    }
+
+    @Test
+    @DisplayName("deleteByDocIds에 빈 목록을 주면 JdbcTemplate을 호출하지 않는다")
+    void deleteByDocIdsSkipsWhenEmpty() {
+        int deleted = writer.deleteByDocIds(List.of());
+
+        assertThat(deleted).isZero();
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    @DisplayName("deleteAll은 테이블 전체에 대해 DELETE를 실행한다")
+    void deleteAllExecutesUnconditionalDelete() {
+        writer.deleteAll();
+
+        verify(jdbcTemplate).execute("DELETE FROM document_embeddings");
     }
 }

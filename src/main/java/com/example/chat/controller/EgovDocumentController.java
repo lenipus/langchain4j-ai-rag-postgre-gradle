@@ -37,6 +37,14 @@ public class EgovDocumentController {
     }
 
     /**
+     * 인덱스 초기화 요청 (해시/임베딩 전체 삭제 후 전체 재인덱싱)
+     */
+    @PostMapping("/reset")
+    public String resetIndex() {
+        return egovDocumentService.resetIndex();
+    }
+
+    /**
      * Markdown 파일 업로드 (최대 5개, .md만, 파일당 5MB, 총 20MB)
      */
     @PostMapping("/upload")

@@ -40,27 +40,37 @@ spring:
 # # 애플리케이션 설정
 # app:
 #   # ONNX 임베딩 모델 설정 파일 경로
-#   # 외부 JSON 파일에서 모델 및 토크나이저 파일 경로를 로드
-#   # Windows 예: C:/Users/{username}/langchain4j-config/embeddingConfig.json
-#   # Linux/Mac 예: /home/{username}/langchain4j-config/embeddingConfig.json
 #   embedding-config-path: ${EMBEDDING_MODEL_PATH:D:/VSCODE/rag/onnx-uv/model}/embeddingConfig.json
 #
 #   관련 파일 (임베딩 Ollama 전환으로 전부 주석 처리됨):
-#   - src/main/java/com/example/chat/util/ConfigUtils.java
-#       : 이 프로퍼티(app.embedding-config-path)를 @Value로 주입받아 JSON 설정 파일을 읽던 유틸리티. 현재 전체 주석 처리됨.
-#   - src/main/java/com/example/chat/config/EgovLangChain4jConfig.java
-#       : ConfigUtils.loadConfig()를 호출해 modelPath/tokenizerPath를 읽고 OnnxEmbeddingModel을 생성하던 로직. 현재 전체 주석 처리됨.
-#   - src/main/java/com/example/chat/config/EgovEmbeddingConfig.java
-#       : 위 JSON 파일(embeddingConfig.json)을 역직렬화하는 DTO (modelPath, tokenizerPath 등).
-#   - k8s/configmap.yaml, k8s/README.md
-#       : APP_EMBEDDING_CONFIG_PATH 환경 변수로 이 값을 주입하던 k8s 설정/문서.
+#   - src/main/java/com/example/chat/util/ConfigUtils.java : 이 프로퍼티(app.embedding-config-path)를 @Value로 주입받아 JSON 설정 파일을 읽던 유틸리티. 현재 전체 주석 처리됨.
+#   - src/main/java/com/example/chat/config/EgovLangChain4jConfig.java : ConfigUtils.loadConfig()를 호출해 modelPath/tokenizerPath를 읽고 OnnxEmbeddingModel을 생성하던 로직. 현재 전체 주석 처리됨.
+#   - src/main/java/com/example/chat/config/EgovEmbeddingConfig.java : 위 JSON 파일(embeddingConfig.json)을 역직렬화하는 DTO (modelPath, tokenizerPath 등).
+#   - k8s/configmap.yaml, k8s/README.md : APP_EMBEDDING_CONFIG_PATH 환경 변수로 이 값을 주입하던 k8s 설정/문서.
 
 # LangChain4j Ollama 설정
 # 채팅(LLM)과 임베딩은 서로 완전히 독립적으로 로컬/원격 전환 가능.
 # api-type이 실제 API 규격을 결정한다: ollama(네이티브, 기본값) | openai(OpenAI 호환, base-url에 /v1 포함해서 설정)
+
+# 임베딩 모델 프로필: model-name과 PGVector 설정(table-name, dimension, hash-table-name)을 하나로 묶는다.
+# active-profile 값 하나만 바꾸면 나머지가 전부 같이 바뀌므로, 모델만 바꾸고 테이블 설정을
+# 안 바꿔서 생기는 실수(예: 모델은 bge-m3인데 테이블은 gemma용)를 방지한다.
+embedding:
+  active-profile: ${EMBEDDING_PROFILE:bgem3}  # gemma | bgem3
+  profiles:
+    gemma:
+      model-name: embeddinggemma:300m
+      dimension: 768
+      table-name: document_embeddings
+      hash-table-name: document_hashes
+    bgem3:
+      model-name: qllama/bge-m3:q8_0
+      dimension: 1024
+      table-name: document_embeddings_bgem3
+      hash-table-name: document_hashes_bgem3
+
 langchain4j:
   ollama:
-    # ===== 채팅(LLM) =====
     chat-model:
       base-url: ${OLLAMA_CHAT_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_CHAT_API_KEY:}
@@ -70,31 +80,21 @@ langchain4j:
       timeout: 60s
       # 컨텍스트 윈도우(num_ctx). Ollama 네이티브(api-type=ollama)일 때만 적용, 0이면 Ollama 기본값 사용
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:0}
-    # ===== 임베딩 (채팅과 별개 서버 지정 가능, 기본은 로컬) =====
     embedding-model:
       base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_EMBEDDING_API_KEY:}
       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
-      model-name: ${OLLAMA_EMBEDDING_MODEL_NAME:embeddinggemma:300m}  # embeddinggemma:300m, qllama/bge-m3:q8_0
+      model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
 
-# PGVector 설정
+# PGVector 설정 - embedding.active-profile(위 embedding 섹션)에 따라 자동으로 결정됨
 pgvector:
   # 거리 측정 방식 (cosine, euclidean, inner_product)
-
-  # embeddinggemma:300m 용
-  table-name: document_embeddings
-  dimension: 768
+  table-name: ${embedding.profiles.${embedding.active-profile}.table-name}
+  dimension: ${embedding.profiles.${embedding.active-profile}.dimension}
   create-table: true
+  # 거리 측정 방식 (cosine, euclidean, inner_product)
   distance-type: cosine
-  hash-table-name: document_hashes
-
-  # bge-m3 용
-  # table-name: document_embeddings_bgem3
-  # dimension: 1024
-  # create-table: true
-  # # 거리 측정 방식 (cosine, euclidean, inner_product)
-  # distance-type: cosine
-  # hash-table-name: document_hashes_bgem3
+  hash-table-name: ${embedding.profiles.${embedding.active-profile}.hash-table-name}
 
 # 문서 처리 설정
 document:

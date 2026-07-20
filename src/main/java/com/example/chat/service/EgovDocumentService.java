@@ -35,6 +35,9 @@ public interface EgovDocumentService {
     // 재인덱싱 요청(비동기) 및 결과 메시지 반환
     String reindexDocuments();
 
+    // 인덱스 초기화(해시/임베딩 전체 삭제 후 전체 재인덱싱, 비동기) 요청 및 결과 메시지 반환
+    String resetIndex();
+
     // 상태 응답 객체 반환
     DocumentStatusResponse getStatusResponse();
 }

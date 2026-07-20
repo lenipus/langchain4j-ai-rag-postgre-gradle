@@ -7,9 +7,13 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.function.IntConsumer;
 
@@ -26,6 +30,10 @@ public class EgovVectorStoreWriter {
 
     private final EmbeddingStore<TextSegment> embeddingStore;
     private final EmbeddingModel embeddingModel;
+    private final JdbcTemplate jdbcTemplate;
+
+    @Value("${pgvector.table-name}")
+    private String tableName;
 
     /**
      * 문서를 임베딩하여 벡터 저장소에 저장
@@ -81,5 +89,31 @@ public class EgovVectorStoreWriter {
             log.error("벡터 저장소 저장 중 오류 발생", e);
             throw new RuntimeException("벡터 저장소 저장 중 오류 발생", e);
         }
+    }
+
+    /**
+     * 원본 파일이 삭제된 문서의 임베딩을 벡터 저장소에서 제거한다.
+     * PgVectorEmbeddingStore가 청크마다 저장한 metadata(JSON)의 {@code id} 값이
+     * {@link com.example.chat.entity.DocumentHashEntity#getDocId()}와 동일한 값을
+     * 공유하므로, 이 값으로 파일 단위 삭제가 가능하다.
+     */
+    public int deleteByDocIds(Collection<String> docIds) {
+        if (docIds == null || docIds.isEmpty()) {
+            return 0;
+        }
+        List<String> ids = new ArrayList<>(docIds);
+        String sql = "DELETE FROM " + tableName + " WHERE metadata::jsonb ->> 'id' = ?";
+        List<Object[]> batchArgs = ids.stream().map(id -> new Object[]{id}).toList();
+        int[] results = jdbcTemplate.batchUpdate(sql, batchArgs);
+        int deleted = Arrays.stream(results).sum();
+        log.info("삭제된 파일 {}개에 대한 임베딩 {}건 삭제 완료", ids.size(), deleted);
+        return deleted;
+    }
+
+    /** 인덱스 초기화용: 벡터 저장소의 모든 임베딩을 삭제한다. */
+    public void deleteAll() {
+        log.info("벡터 저장소 전체 삭제 시작 (테이블: {})", tableName);
+        jdbcTemplate.execute("DELETE FROM " + tableName);
+        log.info("벡터 저장소 전체 삭제 완료");
     }
 }

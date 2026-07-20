@@ -27,6 +27,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -105,11 +106,15 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
                 List<Document> allDocuments = egovDocumentScanner.scanAll();
                 totalCount.set(allDocuments.size());
 
+                // 스캔 결과에 더 이상 존재하지 않는(=원본 파일이 삭제된) 문서의 해시/임베딩 정리.
+                // 변경된 문서가 하나도 없어도 삭제는 반영해야 하므로 아래 조기 반환보다 먼저 수행한다.
+                int deletedCount = cleanupDeletedDocuments(allDocuments);
+
                 // 2단계: 변경된 문서 필터링
                 List<Document> changedDocuments = filterChangedDocuments(allDocuments);
                 changedCount.set(changedDocuments.size());
-                log.info("총 {}개의 문서 중 {}개의 변경된 문서를 처리합니다.",
-                        allDocuments.size(), changedDocuments.size());
+                log.info("총 {}개의 문서 중 {}개의 변경된 문서를 처리합니다. (삭제 정리: {}개)",
+                        allDocuments.size(), changedDocuments.size(), deletedCount);
 
                 if (changedDocuments.isEmpty()) {
                     log.info("변경된 문서가 없습니다. 인덱싱 작업을 건너뜁니다.");
@@ -261,6 +266,37 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     }
 
     @Override
+    public String resetIndex() {
+        log.info("인덱스 초기화 요청 수신");
+        if (!isProcessing.compareAndSet(false, true)) {
+            log.warn("이미 문서 처리가 진행 중입니다.");
+            return "이미 문서 인덱싱이 진행 중입니다.";
+        }
+
+        try {
+            egovVectorStoreWriter.deleteAll();
+            documentHashRepository.deleteAllInBatch();
+            log.info("인덱스 초기화 완료 (해시/임베딩 전체 삭제)");
+        } catch (Exception e) {
+            log.error("인덱스 초기화 중 오류 발생", e);
+            isProcessing.set(false);
+            return "인덱스 초기화 중 오류가 발생했습니다: " + e.getMessage();
+        }
+        // loadDocumentsAsync가 스스로 isProcessing을 재획득하므로 여기서 먼저 해제한다.
+        isProcessing.set(false);
+
+        CompletableFuture<Integer> future = this.loadDocumentsAsync();
+        future.thenAccept(count -> log.info("인덱스 초기화 후 재인덱싱 완료: {}개 청크 처리됨", count))
+                .exceptionally(throwable -> {
+                    log.error("인덱스 초기화 후 재인덱싱 중 오류 발생", throwable);
+                    return null;
+                });
+
+        log.info("인덱스 초기화 후 전체 재인덱싱 요청 성공");
+        return "인덱스를 초기화하고 전체 재인덱싱을 시작했습니다.";
+    }
+
+    @Override
     public DocumentStatusResponse getStatusResponse() {
         return new DocumentStatusResponse(
                 this.isProcessing(),
@@ -304,6 +340,31 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         log.debug("문서 '{}' 변경 감지 (이전 해시: {}, 새 해시: {})",
                 docId, existing.map(DocumentHashEntity::getHash).orElse("없음"), newHash);
         return true;
+    }
+
+    /**
+     * 원본 파일이 삭제되어 더 이상 스캔되지 않는 문서의 해시/임베딩을 정리하는 메서드.
+     * document_hashes에 남아있는 doc_id 중 이번 스캔 결과({@code currentDocuments})에
+     * 없는 것을 "삭제된 파일"로 판단한다.
+     */
+    private int cleanupDeletedDocuments(List<Document> currentDocuments) {
+        Set<String> currentIds = currentDocuments.stream()
+                .map(document -> document.metadata().getString("id"))
+                .collect(Collectors.toSet());
+
+        List<String> deletedIds = documentHashRepository.findAllDocIds().stream()
+                .filter(docId -> !currentIds.contains(docId))
+                .toList();
+
+        if (deletedIds.isEmpty()) {
+            return 0;
+        }
+
+        log.info("삭제된 파일 {}개 감지 - 해시/임베딩 정리 시작: {}", deletedIds.size(), deletedIds);
+        egovVectorStoreWriter.deleteByDocIds(deletedIds);
+        documentHashRepository.deleteAllByIdInBatch(deletedIds);
+        log.info("삭제된 파일 {}개에 대한 해시/임베딩 정리 완료", deletedIds.size());
+        return deletedIds.size();
     }
 
     /**

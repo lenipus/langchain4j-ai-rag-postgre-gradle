@@ -370,6 +370,7 @@
         <div class="admin-panel">
             <h3>관리자 기능</h3>
             <button class="admin-button" id="reindex-btn" onclick="reindexDocuments()">문서 재인덱싱</button>
+            <button class="admin-button" id="reset-btn" onclick="resetIndex()">인덱스 초기화</button>
             <!-- 파일 업로드 UI -->
             <input type="file" id="upload-input" th:attr="accept=${allowedUploadExtensions}" multiple style="display:none" onchange="handleFileSelect(event)">
             <button class="admin-button" id="upload-btn" onclick="document.getElementById('upload-input').click()">문서 업로드</button>
@@ -1038,14 +1039,16 @@
 
         function reindexDocuments() {
             const reindexBtn = document.getElementById('reindex-btn');
+            const resetBtn = document.getElementById('reset-btn');
             const uploadBtn = document.getElementById('upload-btn');
             const statusDiv = document.getElementById('document-status');
             const statusText = document.getElementById('status-text');
             const progressContainer = document.getElementById('progress-container');
 
-            // 버튼 비활성화 (재인덱싱/업로드 동시 작업 충돌 방지)
+            // 버튼 비활성화 (재인덱싱/초기화/업로드 동시 작업 충돌 방지)
             reindexBtn.disabled = true;
             reindexBtn.textContent = '처리 중...';
+            resetBtn.disabled = true;
             uploadBtn.disabled = true;
 
             // 상태 표시 초기화
@@ -1077,6 +1080,60 @@
                 statusText.textContent = '재인덱싱 요청 중 오류가 발생했습니다.';
                 reindexBtn.disabled = false;
                 reindexBtn.textContent = '문서 재인덱싱';
+                resetBtn.disabled = false;
+                uploadBtn.disabled = false;
+            });
+        }
+
+        function resetIndex() {
+            const confirmed = confirm('인덱스를 초기화하면 저장된 모든 문서 해시와 임베딩이 삭제되고, 전체 문서를 처음부터 다시 인덱싱합니다.\n계속하시겠습니까?');
+            if (!confirmed) {
+                return;
+            }
+
+            const reindexBtn = document.getElementById('reindex-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            const uploadBtn = document.getElementById('upload-btn');
+            const statusDiv = document.getElementById('document-status');
+            const statusText = document.getElementById('status-text');
+            const progressContainer = document.getElementById('progress-container');
+
+            // 버튼 비활성화 (재인덱싱/초기화/업로드 동시 작업 충돌 방지)
+            reindexBtn.disabled = true;
+            resetBtn.disabled = true;
+            resetBtn.textContent = '처리 중...';
+            uploadBtn.disabled = true;
+
+            // 상태 표시 초기화
+            statusDiv.className = 'document-status processing';
+            statusDiv.style.display = 'block';
+            statusText.textContent = '인덱스를 초기화하고 있습니다...';
+            progressContainer.style.display = 'none';
+
+            // 기존 상태 체크 인터벌 정리
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+
+            // 비동기 인덱스 초기화 요청
+            fetch('/api/documents/reset', {
+                method: 'POST'
+            })
+            .then(response => {
+                if (response.ok) {
+                    // 상태 체크 시작
+                    startStatusCheck();
+                } else {
+                    throw new Error('인덱스 초기화 요청 실패');
+                }
+            })
+            .catch(error => {
+                console.error('인덱스 초기화 오류:', error);
+                statusDiv.className = 'document-status error';
+                statusText.textContent = '인덱스 초기화 요청 중 오류가 발생했습니다.';
+                reindexBtn.disabled = false;
+                resetBtn.disabled = false;
+                resetBtn.textContent = '인덱스 초기화';
                 uploadBtn.disabled = false;
             });
         }
@@ -1092,6 +1149,7 @@
                         const progressFill = document.getElementById('progress-fill');
                         const progressText = document.getElementById('progress-text');
                         const reindexBtn = document.getElementById('reindex-btn');
+                        const resetBtn = document.getElementById('reset-btn');
                         const uploadBtn = document.getElementById('upload-btn');
 
                         if (data.processing) {
@@ -1101,9 +1159,10 @@
                             statusText.textContent = '문서를 처리하고 있습니다...';
                             progressContainer.style.display = 'block';
 
-                            // 처리 중에는 재인덱싱/업로드 둘 다 막아 동시 작업 충돌 방지
+                            // 처리 중에는 재인덱싱/초기화/업로드 모두 막아 동시 작업 충돌 방지
                             reindexBtn.disabled = true;
                             reindexBtn.textContent = '처리 중...';
+                            resetBtn.disabled = true;
                             uploadBtn.disabled = true;
 
                             // 진행률 계산 및 표시
@@ -1121,6 +1180,8 @@
 
                             reindexBtn.disabled = false;
                             reindexBtn.textContent = '문서 재인덱싱';
+                            resetBtn.disabled = false;
+                            resetBtn.textContent = '인덱스 초기화';
                             uploadBtn.disabled = false;
 
                             // 5초 후 상태 숨김
@@ -1137,12 +1198,15 @@
                         const statusDiv = document.getElementById('document-status');
                         const statusText = document.getElementById('status-text');
                         const reindexBtn = document.getElementById('reindex-btn');
+                        const resetBtn = document.getElementById('reset-btn');
                         const uploadBtn = document.getElementById('upload-btn');
 
                         statusDiv.className = 'document-status error';
                         statusText.textContent = '상태 확인 중 오류가 발생했습니다.';
                         reindexBtn.disabled = false;
                         reindexBtn.textContent = '문서 재인덱싱';
+                        resetBtn.disabled = false;
+                        resetBtn.textContent = '인덱스 초기화';
                         uploadBtn.disabled = false;
                     });
             }, 1000); // 1초마다 상태 확인
