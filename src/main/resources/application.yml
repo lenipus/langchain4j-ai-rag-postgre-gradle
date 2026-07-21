@@ -48,13 +48,7 @@ spring:
 #   - src/main/java/com/example/chat/config/EgovEmbeddingConfig.java : 위 JSON 파일(embeddingConfig.json)을 역직렬화하는 DTO (modelPath, tokenizerPath 등).
 #   - k8s/configmap.yaml, k8s/README.md : APP_EMBEDDING_CONFIG_PATH 환경 변수로 이 값을 주입하던 k8s 설정/문서.
 
-# LangChain4j Ollama 설정
-# 채팅(LLM)과 임베딩은 서로 완전히 독립적으로 로컬/원격 전환 가능.
-# api-type이 실제 API 규격을 결정한다: ollama(네이티브, 기본값) | openai(OpenAI 호환, base-url에 /v1 포함해서 설정)
-
 # 임베딩 모델 프로필: model-name과 PGVector 설정(table-name, dimension, hash-table-name)을 하나로 묶는다.
-# active-profile 값 하나만 바꾸면 나머지가 전부 같이 바뀌므로, 모델만 바꾸고 테이블 설정을
-# 안 바꿔서 생기는 실수(예: 모델은 bge-m3인데 테이블은 gemma용)를 방지한다.
 embedding:
   active-profile: ${EMBEDDING_PROFILE:bgem3}  # gemma | bgem3
   profiles:
@@ -69,63 +63,42 @@ embedding:
       table-name: document_embeddings_bgem3
       hash-table-name: document_hashes_bgem3
 
+# LangChain4j Ollama 설정
 langchain4j:
   ollama:
     chat-model:
       base-url: ${OLLAMA_CHAT_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_CHAT_API_KEY:}
-      api-type: ${OLLAMA_CHAT_API_TYPE:ollama}
+      api-type: ${OLLAMA_CHAT_API_TYPE:ollama}        # API 규격: (ollama, openai)
       model-name: ${OLLAMA_CHAT_MODEL_NAME:}
       temperature: 0.4
       timeout: 60s
-      # 컨텍스트 윈도우(num_ctx). Ollama 네이티브(api-type=ollama)일 때만 적용, 0이면 Ollama 기본값 사용
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:0}
     embedding-model:
       base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_EMBEDDING_API_KEY:}
-      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
+      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
       model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
 
-# PGVector 설정 - embedding.active-profile(위 embedding 섹션)에 따라 자동으로 결정됨
+# PGVector 설정 - embedding.active-profile에 따라 자동으로 결정됨
 pgvector:
-  # 거리 측정 방식 (cosine, euclidean, inner_product)
   table-name: ${embedding.profiles.${embedding.active-profile}.table-name}
   dimension: ${embedding.profiles.${embedding.active-profile}.dimension}
   create-table: true
-  # 거리 측정 방식 (cosine, euclidean, inner_product)
-  distance-type: cosine
+  distance-type: cosine   # 거리 측정 방식: (cosine, euclidean, inner_product)
   hash-table-name: ${embedding.profiles.${embedding.active-profile}.hash-table-name}
 
 # 문서 처리 설정
 document:
-  # 업로드 허용 확장자 (콤마 구분). 프론트(업로드 파일 선택창/검증)와 백엔드 검증,
-  # 그리고 EgovDocumentScanner의 색인 대상 필터가 모두 이 값 하나만 보고 동작한다 -
-  # 확장자 추가/제거는 여기 한 줄과(신규 포맷이면) EgovDocumentReader 구현체 하나만 있으면 된다.
   allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
-
-  # 문서 경로 설정. upload-dir 하위 전체를 재귀 스캔해 확장자별로 알맞은 리더에 위임한다
-  # (EgovDocumentScanner) - 확장자별 path 프로퍼티는 더 이상 필요 없다.
   upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
-
-  # PDF 리더 설정
-  pdf:
-    page-top-margin: 0
-    pages-per-document: 1
-
-  # 문서 변환 설정
-  # 청크 크기 설정 (토큰 단위)
   chunk-size: 4000
+  chunk-overlap: 400
 
-  # 최소 청크 크기 (문자 단위)
-  min-chunk-size-chars: 350
+  # 재인덱싱 시 파일 단위 동시 처리 개수 (1 ~ 4)
+  processing:
+    concurrency: 4
 
-  # 최대 청크 수
-  max-num-chunks: 500
-
-  # 임베딩할 최소 청크 길이
-  min-chunk-length-to-embed: 250
-
-  # 문서 정규화 설정
   normalization:
     enabled: true
     remove-html-tags: true
@@ -142,18 +115,19 @@ rag:
   similarity:
     threshold: 0.60
 
-  # RAG 검색 결과 개수 (Top K)
-  top-k: 5
+  top-k: 6
 
   # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
   retrieval:
     overfetch-multiplier: 3
+    min-chunk-length: 250
+
     hybrid:
       enabled: true
       weight:
         dense: 1.0
         lexical: 1.0
-      top-k: 10
+      top-k: 6
       lexical:
         word-similarity-threshold: 0.30
 

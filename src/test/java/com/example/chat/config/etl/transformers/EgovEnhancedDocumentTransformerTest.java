@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EgovEnhancedDocumentTransformerTest {
 
     private final EgovEnhancedDocumentTransformer transformer =
-            new EgovEnhancedDocumentTransformer(4000, 350);
+            new EgovEnhancedDocumentTransformer(4000, 400);
 
     private Document doc(String id, String text) {
         return Document.from(text, Metadata.from("id", id));

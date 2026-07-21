@@ -38,6 +38,9 @@ public interface EgovDocumentService {
     // 인덱스 초기화(해시/임베딩 전체 삭제 후 전체 재인덱싱, 비동기) 요청 및 결과 메시지 반환
     String resetIndex();
 
+    // 진행 중인 문서 처리(재인덱싱/초기화 재인덱싱) 취소 요청 및 결과 메시지 반환
+    String cancelProcessing();
+
     // 상태 응답 객체 반환
     DocumentStatusResponse getStatusResponse();
 }

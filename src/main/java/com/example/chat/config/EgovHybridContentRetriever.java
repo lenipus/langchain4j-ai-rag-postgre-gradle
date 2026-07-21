@@ -47,7 +47,7 @@ public class EgovHybridContentRetriever implements ContentRetriever {
     private final double lexicalWeight;
     private final double lexicalWordSimilarityThreshold;
     private final int topK;
-    private final int minChunkLengthToEmbed;
+    private final int minChunkLength;
     private final int overfetchMultiplier;
 
     public EgovHybridContentRetriever(ContentRetriever denseRetriever,
@@ -58,7 +58,7 @@ public class EgovHybridContentRetriever implements ContentRetriever {
                                       double lexicalWeight,
                                       double lexicalWordSimilarityThreshold,
                                       int topK,
-                                      int minChunkLengthToEmbed,
+                                      int minChunkLength,
                                       int overfetchMultiplier) {
         this.denseRetriever = denseRetriever;
         this.jdbcTemplate = jdbcTemplate;
@@ -68,7 +68,7 @@ public class EgovHybridContentRetriever implements ContentRetriever {
         this.lexicalWeight = lexicalWeight;
         this.lexicalWordSimilarityThreshold = lexicalWordSimilarityThreshold;
         this.topK = topK;
-        this.minChunkLengthToEmbed = minChunkLengthToEmbed;
+        this.minChunkLength = minChunkLength;
         this.overfetchMultiplier = overfetchMultiplier;
     }
 
@@ -147,7 +147,7 @@ public class EgovHybridContentRetriever implements ContentRetriever {
                 String text = rs.getString(TEXT_COLUMN);
                 String docId = rs.getString(DOC_ID_COLUMN);
                 return toContent(text, docId);
-            }, queryText, minChunkLengthToEmbed, queryText, topK * overfetchMultiplier);
+            }, queryText, minChunkLength, queryText, topK * overfetchMultiplier);
         });
     }
 

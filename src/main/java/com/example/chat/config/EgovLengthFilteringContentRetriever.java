@@ -21,12 +21,12 @@ import java.util.List;
 public class EgovLengthFilteringContentRetriever implements ContentRetriever {
 
     private final ContentRetriever delegate;
-    private final int minChunkLengthToEmbed;
+    private final int minChunkLength;
     private final int finalTopK;
 
-    public EgovLengthFilteringContentRetriever(ContentRetriever delegate, int minChunkLengthToEmbed, int finalTopK) {
+    public EgovLengthFilteringContentRetriever(ContentRetriever delegate, int minChunkLength, int finalTopK) {
         this.delegate = delegate;
-        this.minChunkLengthToEmbed = minChunkLengthToEmbed;
+        this.minChunkLength = minChunkLength;
         this.finalTopK = finalTopK;
     }
 
@@ -37,7 +37,7 @@ public class EgovLengthFilteringContentRetriever implements ContentRetriever {
         int skipped = 0;
         for (Content content : fetched) {
             String text = content.textSegment().text();
-            if (text == null || text.trim().length() < minChunkLengthToEmbed) {
+            if (text == null || text.trim().length() < minChunkLength) {
                 skipped++;
                 continue;
             }
@@ -48,7 +48,7 @@ public class EgovLengthFilteringContentRetriever implements ContentRetriever {
         }
         if (skipped > 0) {
             log.debug("길이 필터 - 오버페치 {}개 중 {}개를 최소 길이({}자) 미만으로 제외, 최종 {}개 반환",
-                    fetched.size(), skipped, minChunkLengthToEmbed, filtered.size());
+                    fetched.size(), skipped, minChunkLength, filtered.size());
         }
         return filtered;
     }

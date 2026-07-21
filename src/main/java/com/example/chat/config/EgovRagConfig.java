@@ -32,8 +32,8 @@ public class EgovRagConfig {
     private String tableName;
 
     /** 검색 결과 중 이 길이(문자) 미만인 청크는 스퓨리어스 매칭으로 간주해 제외한다. */
-    @Value("${document.min-chunk-length-to-embed:50}")
-    private int minChunkLengthToEmbed;
+    @Value("${rag.retrieval.min-chunk-length:50}")
+    private int minChunkLength;
 
     /** 길이 필터링으로 줄어들 것을 감안해 top-k보다 이 배수만큼 더 가져온다. */
     @Value("${rag.retrieval.overfetch-multiplier:3}")
@@ -69,8 +69,8 @@ public class EgovRagConfig {
             EmbeddingModel embeddingModel) {
 
         int overfetchResults = topK * overfetchMultiplier;
-        log.info("ContentRetriever 초기화 - topK: {}, minScore: {}, overfetch: {}, minChunkLengthToEmbed: {}",
-                topK, similarityThreshold, overfetchResults, minChunkLengthToEmbed);
+        log.info("ContentRetriever 초기화 - topK: {}, minScore: {}, overfetch: {}, minChunkLength: {}",
+                topK, similarityThreshold, overfetchResults, minChunkLength);
 
         ContentRetriever embeddingRetriever = EmbeddingStoreContentRetriever.builder()
                 .embeddingStore(embeddingStore)
@@ -80,7 +80,7 @@ public class EgovRagConfig {
                 .build();
 
         // top-k보다 넉넉히 가져온 뒤, 짧은 청크(스퓨리어스 매칭 위험)를 걸러내고 최종 topK로 자른다.
-        return new EgovLengthFilteringContentRetriever(embeddingRetriever, minChunkLengthToEmbed, topK);
+        return new EgovLengthFilteringContentRetriever(embeddingRetriever, minChunkLength, topK);
     }
 
     /**
@@ -110,6 +110,6 @@ public class EgovRagConfig {
         return new EgovHybridContentRetriever(
                 denseContentRetriever, jdbcTemplate, transactionManager, tableName,
                 hybridDenseWeight, hybridLexicalWeight, hybridLexicalWordSimilarityThreshold, effectiveTopK,
-                minChunkLengthToEmbed, overfetchMultiplier);
+                minChunkLength, overfetchMultiplier);
     }
 }

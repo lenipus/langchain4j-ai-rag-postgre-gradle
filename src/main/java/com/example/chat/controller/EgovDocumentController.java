@@ -45,6 +45,14 @@ public class EgovDocumentController {
     }
 
     /**
+     * 진행 중인 문서 처리(재인덱싱/초기화 재인덱싱) 취소 요청
+     */
+    @PostMapping("/cancel")
+    public String cancelProcessing() {
+        return egovDocumentService.cancelProcessing();
+    }
+
+    /**
      * Markdown 파일 업로드 (최대 5개, .md만, 파일당 5MB, 총 20MB)
      */
     @PostMapping("/upload")

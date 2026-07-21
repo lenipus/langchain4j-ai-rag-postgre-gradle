@@ -12,13 +12,12 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 /**
  * PDF 문서 로더
- * PDFBox로 페이지 단위 파싱하여 각 페이지에 실제 페이지 번호(page_number)를 부여한다.
+ * PDFBox로 페이지별 텍스트를 추출해 파일 하나를 문서 하나로 합친다.
  */
 @Slf4j
 @Component
@@ -38,12 +37,15 @@ public class EgovPdfReader implements EgovDocumentReader {
     }
 
     /**
-     * PDF 파일을 페이지 단위로 파싱해 페이지당 하나의 문서를 생성한다.
+     * PDF 파일의 전체 페이지를 이어 붙여 파일당 하나의 문서로 생성한다.
      *
-     * <p>PDFBox {@link PDFTextStripper}로 페이지별 텍스트를 추출하고, 각 문서에 실제 페이지
-     * 번호({@code page_number})를 부여한다(출처 인용에 필요). 텍스트가 비어 있는 페이지(스캔
-     * 이미지 등)는 색인에서 건너뛴다. 페이지 내 청킹은 {@code EgovEnhancedDocumentTransformer}가
-     * 담당하며, 페이지 단위로 문서가 나뉘므로 청크가 페이지 경계를 넘지 않는다.</p>
+     * <p>예전에는 페이지마다 별도 문서(및 별도 id·해시)를 만들었다. 이러면 문장·표처럼
+     * 페이지 경계를 넘어 이어지는 내용이 강제로 서로 다른 청크로 쪼개져 문맥이 끊기는
+     * 문제가 있었다(청킹이 {@code EgovEnhancedDocumentTransformer}에서 이뤄지는데, 애초에
+     * 리더 단계에서 페이지 단위로 문서가 나뉘어 있으니 청크가 페이지 경계를 넘을 수 없었다).
+     * 다른 리더(HWP·DOCX·TXT·JSON)와 동일하게 파일 전체를 하나의 텍스트로 합쳐서 넘기면,
+     * 청크 분할기가 페이지 경계와 무관하게 문맥이 이어지는 지점에서 자연스럽게 청크를
+     * 나눈다. 텍스트가 비어 있는 페이지(스캔 이미지 등)는 건너뛴다.</p>
      */
     List<Document> parsePdfDocument(Resource resource) throws IOException {
         String filename = resource.getFilename();
@@ -52,7 +54,7 @@ public class EgovPdfReader implements EgovDocumentReader {
         }
         String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
 
-        List<Document> documents = new ArrayList<>();
+        StringBuilder combined = new StringBuilder();
 
         try (InputStream inputStream = resource.getInputStream();
              PDDocument pdf = PDDocument.load(inputStream)) {
@@ -70,20 +72,29 @@ public class EgovPdfReader implements EgovDocumentReader {
                     continue;
                 }
 
-                String customId = String.format("pdf-%s_%d", safeFilename, page);
-                Metadata metadata = Metadata.from("id", customId);
-                metadata.put("file_name", filename);
-                metadata.put("source", filename);
-                metadata.put("type", "pdf");
-                metadata.put("content_length", String.valueOf(content.length()));
-                metadata.put("page_number", String.valueOf(page));
-
-                documents.add(Document.from(content, metadata));
+                if (!combined.isEmpty()) {
+                    combined.append("\n\n");
+                }
+                combined.append(content.strip());
             }
-
-            log.debug("PDF '{}': {}페이지 중 {}개 문서 생성", filename, pageCount, documents.size());
         }
 
-        return documents;
+        String text = combined.toString();
+        if (text.isBlank()) {
+            log.warn("PDF '{}': 추출된 텍스트가 없습니다.", filename);
+            return List.of();
+        }
+
+        String customId = String.format("pdf-%s_1", safeFilename);
+        Metadata metadata = Metadata.from("id", customId);
+        metadata.put("file_name", filename);
+        metadata.put("source", filename);
+        metadata.put("type", "pdf");
+        metadata.put("content_length", String.valueOf(text.length()));
+        metadata.put("page_number", "1");
+
+        log.debug("PDF '{}': 문서 1개로 병합 완료 (길이: {})", filename, text.length());
+
+        return List.of(Document.from(text, metadata));
     }
 }

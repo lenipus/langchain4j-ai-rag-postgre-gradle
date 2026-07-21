@@ -53,10 +53,33 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     }
 
     /**
+     * RAG로 검색된 문서가 사용자 메시지에 삽입될 때 DefaultContentInjector가 붙이는 구분자.
+     * 과거(이미 답변까지 끝난) 턴의 사용자 메시지에서만 이 뒤 내용을 잘라내 히스토리
+     * 누적으로 컨텍스트 윈도우가 터지는 걸 막는다. 자세한 이유는 updateMessages() 참고.
+     */
+    private static final String RAG_INJECTION_MARKER = "\n\nAnswer using the following information:\n";
+
+    /**
      * 메시지 업데이트
      *
+     * <p>{@link dev.langchain4j.memory.chat.MessageWindowChatMemory#add(ChatMessage)}는 매번
+     * "현재 메모리 전체를 읽고 → 새 메시지 하나를 리스트 끝에 추가 → 전체를 다시 저장"하는
+     * 방식으로 동작하므로, 여기 들어오는 {@code messages}의 마지막 원소가 항상 "방금 막
+     * 추가된 메시지"다. RAG 턴은 다음 순서로 add()가 두 번 불린다:</p>
+     * <ol>
+     *   <li>검색 결과가 삽입된 사용자 메시지 add → 이 시점엔 그 메시지가 마지막 원소이므로
+     *       그대로(스트립 안 함) 저장한다. 이래야 곧이어 이 메시지를 다시 읽어 LLM에 보낼 때
+     *       검색된 문서 내용이 실려 있다(안 그러면 RAG 자체가 무력화됨 - 예전에 겪은 문제).</li>
+     *   <li>LLM 응답을 받은 뒤 AI 메시지 add → 이제 그 AI 메시지가 마지막이 되고, 직전
+     *       사용자 메시지는 더 이상 마지막이 아니므로 이때 비로소 스트립 대상이 된다. 이
+     *       턴의 생성은 이미 끝났으니 이 시점부터는 "과거 턴"으로 취급해도 안전하다.</li>
+     * </ol>
+     * <p>이렇게 마지막 원소만 예외로 두면, 현재 턴의 RAG 컨텍스트는 그대로 유지하면서도
+     * 과거 턴들의 검색 결과는 세션이 길어져도 계속 쌓이지 않아 컨텍스트 윈도우 초과
+     * (예: "40036 tokens exceeds ... 32768") 문제를 완화한다.</p>
+     *
      * @param memoryId 세션 ID
-     * @param messages 저장할 메시지 리스트
+     * @param messages 저장할 메시지 리스트 (마지막 원소 = 방금 추가된 메시지)
      */
     @Override
     @Transactional
@@ -68,8 +91,10 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         chatMemoryRepository.deleteBySessionId(sessionId);
 
         // 새 메시지 저장
-        for (ChatMessage message : messages) {
-            ChatMemoryEntity entity = convertToEntity(sessionId, message);
+        int lastIndex = messages.size() - 1;
+        for (int i = 0; i < messages.size(); i++) {
+            boolean isLatest = (i == lastIndex);
+            ChatMemoryEntity entity = convertToEntity(sessionId, messages.get(i), isLatest);
             if (entity != null) {
                 chatMemoryRepository.save(entity);
             }
@@ -112,14 +137,17 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
 
     /**
      * LangChain4j ChatMessage를 Entity로 변환
+     *
+     * @param isLatest 이 배치에서 방금 추가된(가장 마지막) 메시지인지 여부. 사용자 메시지이면서
+     *                 이게 false일 때만(=과거 턴) RAG 삽입 텍스트를 잘라낸다.
      */
-    private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message) {
+    private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message, boolean isLatest) {
         String messageType;
         String content;
 
         if (message instanceof UserMessage userMessage) {
             messageType = "USER";
-            content = userMessage.singleText();
+            content = isLatest ? userMessage.singleText() : stripRagInjection(userMessage.singleText());
         } else if (message instanceof AiMessage aiMessage) {
             messageType = "ASSISTANT";
             content = aiMessage.text();
@@ -132,5 +160,13 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         }
 
         return new ChatMemoryEntity(sessionId, messageType, content);
+    }
+
+    private String stripRagInjection(String text) {
+        if (text == null) {
+            return null;
+        }
+        int index = text.indexOf(RAG_INJECTION_MARKER);
+        return index >= 0 ? text.substring(0, index) : text;
     }
 }

@@ -24,7 +24,11 @@ import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -49,6 +53,12 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     @Value("${document.allowed-upload-extensions:.md,.pdf,.docx}")
     private String[] allowedUploadExtensions;
 
+    // 재인덱싱 시 파일 단위 동시 처리 개수. 1~MAX_CONCURRENCY 범위를 벗어나면 clamp한다
+    private static final int MAX_CONCURRENCY = 4;
+
+    @Value("${document.processing.concurrency:1}")
+    private int configuredConcurrency;
+
     // ETL 파이프라인 컴포넌트들
     private final EgovDocumentScanner egovDocumentScanner;
     private final EgovContentFormatTransformer egovContentFormatTransformer;
@@ -63,6 +73,7 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     private final Executor executor;
 
     private final AtomicBoolean isProcessing = new AtomicBoolean(false);
+    private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
     private final AtomicInteger processedCount = new AtomicInteger(0);
     private final AtomicInteger totalCount = new AtomicInteger(0);
     private final AtomicInteger changedCount = new AtomicInteger(0);
@@ -96,6 +107,7 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         }
 
         log.info("LangChain4j ETL 파이프라인으로 문서 처리 시작");
+        cancelRequested.set(false);
         processedCount.set(0);
         totalCount.set(0);
         changedCount.set(0);
@@ -121,67 +133,53 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
                     return 0;
                 }
 
-                // 3단계: 문서 형식 정규화 (ContentFormatTransformer)
-                log.info("문서 형식 정규화 시작");
-                List<Document> normalizedDocuments = egovContentFormatTransformer.transformAll(changedDocuments);
-                log.info("문서 형식 정규화 완료: {}개 문서", normalizedDocuments.size());
-
-                // 4단계: 문서 변환 (청크 분할, 메타데이터 추가)
-                log.info("문서 변환 시작");
-                List<Document> transformedDocuments = egovEnhancedDocumentTransformer.transformAll(normalizedDocuments);
-                log.info("문서 변환 완료: {}개 청크 생성", transformedDocuments.size());
-
-                // 진행률 표시 기준을 파일(원본 문서) 개수로 맞춘다. 청크 수는 사용자에게
-                // "전체 몇 개 중 몇 번째"라는 감을 주지 못하므로(문서마다 청크 수가 다름) 파일
-                // 단위가 화면·로그 모두에 더 의미 있다.
-                totalCount.set(changedDocuments.size());
+                // 3~6단계: 파일 하나를 정규화 → 청크 분할 → 임베딩 저장 → 해시 커밋까지 전부
+                // 처리한다. 처리 단위가 "파일 하나"로 독립적이므로, 설정된 동시 처리 개수만큼
+                // 스레드 풀로 병렬 실행한다(기본 1 = 기존과 동일한 순차 처리).
+                int fileTotal = changedDocuments.size();
+                totalCount.set(fileTotal);
                 processedCount.set(0);
 
-                // 5+6단계: 원본 문서 단위로 청크를 저장하고, 그 문서의 청크 저장이 끝나는
-                // 즉시 해시를 등록한다. 예전에는 전체 문서의 임베딩이 다 끝난 뒤 한꺼번에
-                // 해시를 등록했는데, 그러면 중간에 프로세스가 죽었을 때 이미 임베딩까지 끝난
-                // 문서조차 해시가 없어 다음 실행에서 처음부터 다시 처리되고(벡터 저장소에
-                // 같은 내용이 중복 삽입될 위험도 있다), 문서 단위로 나눠 즉시 커밋해 이를 막는다.
-                // 분할 후에도 청크의 metadata.id는 원본 문서와 동일하게 유지되므로
-                // (index만 청크별로 다름) 이 값으로 청크를 원본 문서에 재귀속시킬 수 있다.
-                log.info("벡터 저장소 저장 시작");
-                Map<String, List<Document>> chunksByDocId = transformedDocuments.stream()
-                        .collect(Collectors.groupingBy(d -> d.metadata().getString("id"),
-                                LinkedHashMap::new, Collectors.toList()));
+                int effectiveConcurrency = clampConcurrency(configuredConcurrency);
+                log.info("파일 처리 동시 실행 수: {}", effectiveConcurrency);
 
-                int fileTotal = changedDocuments.size();
-                int fileIndex = 0;
-                for (Document originalDocument : changedDocuments) {
-                    fileIndex++;
-                    String docId = originalDocument.metadata().getString("id");
-                    String fileName = originalDocument.metadata().getString("file_name");
-                    List<Document> docChunks = chunksByDocId.getOrDefault(docId, List.of());
-                    if (!docChunks.isEmpty()) {
-                        egovVectorStoreWriter.write(docChunks);
-                    }
-                    // 청크가 하나도 없어도(정규화 후 내용이 비어버린 경우 등) 해시는 등록해
-                    // 다음 실행에서 같은 문서를 계속 "변경됨"으로 재시도하지 않게 한다.
-                    saveDocumentHash(originalDocument);
+                AtomicInteger completedCount = new AtomicInteger(0);
+                AtomicInteger totalChunksCounter = new AtomicInteger(0);
 
-                    processedCount.set(fileIndex);
-                    log.info("[{}/{}] {} - 해시 저장 완료 ({}개 청크)",
-                            fileIndex, fileTotal, fileName, docChunks.size());
+                // concurrency=1(기본값)은 스레드 풀 오버헤드 없이 호출 스레드에서 그대로 처리한다.
+                // 2 이상일 때만 실제 스레드 풀을 쓴다
+                boolean cancelled = effectiveConcurrency == 1
+                        ? processFilesSequentially(changedDocuments, fileTotal, completedCount, totalChunksCounter)
+                        : processFilesConcurrently(changedDocuments, fileTotal, effectiveConcurrency,
+                                completedCount, totalChunksCounter);
+
+                int fileIndex = completedCount.get();
+                if (cancelled) {
+                    log.info("문서 처리 취소됨: 전체 {}개 중 {}개 파일 처리 후 중단", fileTotal, fileIndex);
+                } else {
+                    log.info("문서 처리 완료: {}개 파일 처리됨 (청크: {}개 생성)", fileIndex, totalChunksCounter.get());
                 }
-                log.info("벡터 저장소 저장 완료");
 
-                processedCount.set(changedDocuments.size());
-                log.info("문서 처리 완료: {}개 파일 처리됨 (청크: {}개 생성)",
-                        changedDocuments.size(), transformedDocuments.size());
-
-                return changedDocuments.size();
+                return fileIndex;
 
             } catch (Exception e) {
                 log.error("문서 처리 중 오류 발생", e);
                 throw new RuntimeException("문서 처리 중 오류 발생", e);
             } finally {
                 isProcessing.set(false);
+                cancelRequested.set(false);
             }
         }, executor);
+    }
+
+    @Override
+    public String cancelProcessing() {
+        if (!isProcessing.get()) {
+            return "진행 중인 작업이 없습니다.";
+        }
+        cancelRequested.set(true);
+        log.info("문서 처리 취소 요청 수신");
+        return "취소 요청을 접수했습니다. 현재 파일 처리가 끝나는 대로 중단됩니다.";
     }
 
     @Override
@@ -403,5 +401,120 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
             DocumentHashEntity entity = new DocumentHashEntity(docId, newHash);
             documentHashRepository.save(entity);
         }
+    }
+
+    /**
+     * 설정된 동시 처리 개수를 1~{@value #MAX_CONCURRENCY} 범위로 보정한다.
+     * 범위를 벗어나면 경고 로그를 남기고 가까운 경계값으로 조정한다.
+     */
+    private int clampConcurrency(int configured) {
+        if (configured < 1) {
+            log.warn("document.processing.concurrency 값({})이 1보다 작아 1로 보정합니다.", configured);
+            return 1;
+        }
+        if (configured > MAX_CONCURRENCY) {
+            log.warn("document.processing.concurrency 값({})이 최대값({})을 초과해 보정합니다.",
+                    configured, MAX_CONCURRENCY);
+            return MAX_CONCURRENCY;
+        }
+        return configured;
+    }
+
+    /**
+     * concurrency=1 전용 순차 처리. 스레드 풀 없이 호출 스레드에서 파일 경계마다 취소
+     * 여부를 확인하므로, 취소 요청은 다음 파일로 넘어가기 전에 정확히 반영된다.
+     *
+     * @return 취소로 인해 중단됐으면 true
+     */
+    private boolean processFilesSequentially(List<Document> changedDocuments, int fileTotal,
+            AtomicInteger completedCount, AtomicInteger totalChunksCounter) {
+        for (Document originalDocument : changedDocuments) {
+            if (cancelRequested.get()) {
+                log.info("취소 요청으로 재인덱싱을 중단합니다 ({}/{} 완료)", completedCount.get(), fileTotal);
+                return true;
+            }
+            try {
+                processOneFile(originalDocument, fileTotal, completedCount, totalChunksCounter);
+            } catch (Exception e) {
+                log.error("파일 처리 중 오류 발생", e);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * concurrency&gt;1일 때 파일 단위 스레드 풀 병렬 처리. 이미 스레드 풀에 제출된 파일은
+     * 취소 요청 이후에도 끝까지 실행된다(진행 중인 임베딩 호출을 안전하게 중간에 끊을
+     * 방법이 없으므로, 제출 전 파일만 막는 best-effort 취소).
+     *
+     * @return 취소로 인해 남은 파일을 제출하지 않고 중단했으면 true
+     */
+    private boolean processFilesConcurrently(List<Document> changedDocuments, int fileTotal, int concurrency,
+            AtomicInteger completedCount, AtomicInteger totalChunksCounter) {
+        boolean cancelled = false;
+        ExecutorService fileExecutor = Executors.newFixedThreadPool(concurrency);
+        try {
+            List<Future<?>> futures = new ArrayList<>();
+            for (Document originalDocument : changedDocuments) {
+                if (cancelRequested.get()) {
+                    cancelled = true;
+                    log.info("취소 요청으로 남은 파일은 제출하지 않습니다 (제출된 파일 {}개는 계속 진행)",
+                            futures.size());
+                    break;
+                }
+                futures.add(fileExecutor.submit(() ->
+                        processOneFile(originalDocument, fileTotal, completedCount, totalChunksCounter)));
+            }
+
+            // 개별 파일 실패가 전체 배치를 중단시키지 않도록 예외는 로그만 남기고 다음 파일
+            // 결과를 계속 기다린다. 실패한 파일은 해시가 저장되지 않으므로 다음 재인덱싱 때
+            // "변경됨"으로 다시 잡혀 재시도된다.
+            for (Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (ExecutionException e) {
+                    log.error("파일 처리 중 오류 발생", e.getCause());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        } finally {
+            fileExecutor.shutdown();
+        }
+        return cancelled;
+    }
+
+    /**
+     * 파일 하나를 정규화 → 청크 분할 → 임베딩 저장 → 해시 커밋까지 끝까지 처리한다.
+     * 스레드 풀에서 동시에 여러 파일에 대해 호출될 수 있으므로, 공유 카운터는 모두
+     * {@link AtomicInteger}로 받는다.
+     */
+    private void processOneFile(Document originalDocument, int fileTotal,
+            AtomicInteger completedCount, AtomicInteger totalChunksCounter) {
+        // 병렬 처리 시 제출은 됐지만 아직 실행되지 않은 파일은, 그 사이 취소 요청이 들어왔다면
+        // 여기서 건너뛴다(제출 전 확인만으로는 막지 못하는 "제출 후 실행 전" 구간 보완).
+        if (cancelRequested.get()) {
+            return;
+        }
+
+        String fileName = originalDocument.metadata().getString("file_name");
+
+        // 정규화(1:1)는 transform()으로, 청크 분할(1:N)은 transformAll()로 처리한다.
+        // EgovEnhancedDocumentTransformer.transform()은 인터페이스 호환용 어댑터일 뿐
+        // 청크 여러 개 중 첫 번째만 반환하므로(반환 타입이 Document 하나) 여기서 쓰면 안 된다.
+        Document normalizedDocument = egovContentFormatTransformer.transform(originalDocument);
+        List<Document> docChunks = egovEnhancedDocumentTransformer.transformAll(List.of(normalizedDocument));
+
+        if (!docChunks.isEmpty()) {
+            egovVectorStoreWriter.write(docChunks);
+            totalChunksCounter.addAndGet(docChunks.size());
+        }
+        // 청크가 하나도 없어도(정규화 후 내용이 비어버린 경우 등) 해시는 등록해 다음
+        // 실행에서 같은 문서를 계속 "변경됨"으로 재시도하지 않게 한다.
+        saveDocumentHash(originalDocument);
+
+        int completed = completedCount.incrementAndGet();
+        processedCount.set(completed);
+        log.info("[{}/{}] {} - 해시 저장 완료 ({}개 청크)", completed, fileTotal, fileName, docChunks.size());
     }
 }

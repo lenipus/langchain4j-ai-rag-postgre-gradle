@@ -193,6 +193,13 @@ h1 {
     background-color: #7f8c8d;
     cursor: not-allowed;
 }
+.cancel-button {
+    background-color: #e74c3c;
+    margin-top: 8px;
+}
+.cancel-button:hover {
+    background-color: #c0392b;
+}
 .document-status {
     margin-top: 15px;
     padding: 10px;

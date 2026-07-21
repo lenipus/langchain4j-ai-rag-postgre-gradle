@@ -93,12 +93,12 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
             newMetadata.put("code_blocks_removed", String.valueOf(removeCodeBlocks));
             newMetadata.put("special_chars_cleaned", String.valueOf(cleanSpecialChars));
 
-            if (log.isDebugEnabled()) {
-                log.debug("정규화 적용: {} -> {} (길이: {} -> {})",
-                        originalContent.substring(0, Math.min(50, originalContent.length())),
-                        normalizedContent.substring(0, Math.min(50, normalizedContent.length())),
-                        originalContent.length(), normalizedContent.length());
-            }
+            // if (log.isDebugEnabled()) {
+            //     log.debug("정규화 적용: {} -> {} (길이: {} -> {})",
+            //             originalContent.substring(0, Math.min(50, originalContent.length())),
+            //             normalizedContent.substring(0, Math.min(50, normalizedContent.length())),
+            //             originalContent.length(), normalizedContent.length());
+            // }
 
             return Document.from(normalizedContent, newMetadata);
         }
