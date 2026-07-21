@@ -88,6 +88,11 @@ dependencies {
     // PostgreSQL Driver
     runtimeOnly 'org.postgresql:postgresql'
 
+    // SQL 생성 도구(SqlGenService)에서 등록 가능한 DB 종류 확장용 드라이버.
+    // MariaDB는 MySQL과도 호환되는 드라이버라 mysql:// URL도 대부분 그대로 접속된다.
+    runtimeOnly 'org.mariadb.jdbc:mariadb-java-client:3.3.3'
+    runtimeOnly 'com.oracle.database.jdbc:ojdbc8:21.9.0.0'
+
     // Testcontainers: 하이브리드 lexical 검색(pg_trgm word_similarity) 실 DB 통합 테스트용.
     // Docker 미가용 환경에서는 @Testcontainers(disabledWithoutDocker=true)로 자동 skip.
     testImplementation 'org.testcontainers:postgresql'

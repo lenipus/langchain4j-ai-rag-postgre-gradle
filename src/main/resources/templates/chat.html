@@ -32,6 +32,7 @@
             <h3>관리자 기능</h3>
             <button class="admin-button" id="reindex-btn" onclick="reindexDocuments()">문서 재인덱싱</button>
             <button class="admin-button" id="reset-btn" onclick="resetIndex()">인덱스 초기화</button>
+            <button class="admin-button" onclick="location.href='/sqlgen'">SQL 생성 도구</button>
             <!-- 파일 업로드 UI -->
             <input type="file" id="upload-input" th:attr="accept=${allowedUploadExtensions}" multiple style="display:none" onchange="handleFileSelect(event)">
             <button class="admin-button" id="upload-btn" onclick="document.getElementById('upload-input').click()">문서 업로드</button>

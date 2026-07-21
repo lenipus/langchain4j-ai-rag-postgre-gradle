@@ -149,6 +149,14 @@ chat:
 session:
   table-name: chat_sessions
 
+# SQL 생성 도구(com.example.sqlgen) 설정
+sqlgen:
+  encryption:
+    # 등록된 DB 연결의 비밀번호를 암호화하는 AES-256 키(Base64, 32바이트).
+    # 운영 환경에서는 반드시 SQLGEN_ENCRYPTION_KEY 환경변수로 별도 값을 지정할 것 -
+    # 이 키가 바뀌면 이미 등록된 연결들의 비밀번호는 복호화할 수 없게 되어 재등록이 필요하다.
+    secret-key: ${SQLGEN_ENCRYPTION_KEY:bd9aNsMfEM9jvt6Qbb9SnmozRSZSpSvMMchdNo2MO7M=}
+
 # 로깅 설정
 logging:
   level:

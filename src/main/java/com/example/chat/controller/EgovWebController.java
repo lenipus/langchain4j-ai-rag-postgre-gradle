@@ -36,4 +36,12 @@ public class EgovWebController {
         model.addAttribute("allowedUploadExtensions", allowedUploadExtensions);
         return "chat";
     }
+
+    /**
+     * SQL 생성 도구 페이지 제공
+     */
+    @GetMapping("/sqlgen")
+    public String sqlGenPage() {
+        return "sqlgen";
+    }
 }

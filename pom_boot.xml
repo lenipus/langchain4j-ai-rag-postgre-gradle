@@ -119,6 +119,21 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- SQL 생성 도구(com.example.sqlgen)에서 등록 가능한 DB 종류 확장용 드라이버.
+             MariaDB는 MySQL과도 호환되는 드라이버라 mysql:// URL도 대부분 그대로 접속된다. -->
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+            <version>3.3.3</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc8</artifactId>
+            <version>21.9.0.0</version>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Testcontainers: 하이브리드 lexical 검색(pg_trgm word_similarity) 실 DB 통합 테스트용.
              Docker 미가용 환경에서는 @Testcontainers(disabledWithoutDocker=true)로 자동 skip. -->
         <dependency>
