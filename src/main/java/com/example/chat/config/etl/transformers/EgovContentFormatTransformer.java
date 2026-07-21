@@ -61,14 +61,19 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
             normalizedContent = normalizedContent.replaceAll("<[^>]*>", "");
         }
 
-        // 공백 정규화
+        // 공백 정규화. \s는 줄바꿈(\n)도 포함하므로 \s+ 를 그대로 쓰면 문서의 줄바꿈 구조가
+        // 전부 스페이스로 뭉개진다(항목별로 줄바꿈된 목록형 문서가 한 줄로 이어붙는 문제의
+        // 원인이었다). 줄바꿈은 아래 줄바꿈 정규화 단계가 따로 처리하므로, 여기서는 가로
+        // 공백(스페이스·탭)만 정리한다.
         if (normalizeWhitespace) {
-            normalizedContent = normalizedContent.replaceAll("\\s+", " ");
+            normalizedContent = normalizedContent.replaceAll("[ \\t]+", " ");
         }
 
-        // 줄바꿈 정규화
+        // 줄바꿈 정규화. 치환 문자열에 "\\n"(백슬래시+n 두 글자)을 쓰면 정규식 치환 문자열
+        // 이스케이프 규칙상 실제 개행이 아니라 리터럴 문자 "n"이 들어간다 - 지금까지는 위
+        // 공백 정규화가 줄바꿈을 먼저 다 없애버려서 이 버그가 드러나지 않았을 뿐이다.
         if (normalizeNewlines) {
-            normalizedContent = normalizedContent.replaceAll("\\n{2,}", "\\n");
+            normalizedContent = normalizedContent.replaceAll("\\n{2,}", "\n");
         }
 
         // 코드 블록 제거

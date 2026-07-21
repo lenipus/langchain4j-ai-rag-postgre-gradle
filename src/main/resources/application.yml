@@ -92,8 +92,8 @@ pgvector:
 document:
   allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
   upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
-  chunk-size: 4000
-  chunk-overlap: 400
+  chunk-size: 1200
+  chunk-overlap: 150
 
   # 재인덱싱 시 파일 단위 동시 처리 개수 (1 ~ 4)
   processing:
@@ -110,11 +110,8 @@ document:
 # RAG 설정
 rag:
   enable-query-compression: false
-
-  # RAG 유사도 임계값 설정 (0.0 ~ 1.0)
   similarity:
-    threshold: 0.60
-
+    threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
   top-k: 6
 
   # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
@@ -123,25 +120,22 @@ rag:
     min-chunk-length: 250
 
     hybrid:
-      enabled: true
+      enabled: false
       weight:
         dense: 1.0
         lexical: 1.0
       top-k: 6
       lexical:
-        word-similarity-threshold: 0.30
+        word-similarity-threshold: 0.10
 
 # 채팅 메모리 설정
 chat:
   memory:
-    # 최대 메시지 수
     max-messages: 20
-    # PostgreSQL 테이블명
     table-name: chat_memory
 
 # 세션 관리 설정
 session:
-  # PostgreSQL 테이블명
   table-name: chat_sessions
 
 # 로깅 설정

@@ -2,6 +2,7 @@ package com.example.chat.service;
 
 import com.example.chat.config.EgovLoggingContentRetriever;
 import com.example.chat.repository.PersistentChatMemoryStore;
+import com.example.chat.repository.RagRetrievalLogRepository;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
@@ -66,11 +67,13 @@ public class ChatbotFactory {
             @Qualifier("hybridContentRetriever") @Autowired(required = false) ContentRetriever hybridContentRetriever,
             @Qualifier("contentRetriever") ContentRetriever denseContentRetriever,
             PersistentChatMemoryStore chatMemoryStore,
-            StreamingChatModel defaultStreamingModel) {
+            StreamingChatModel defaultStreamingModel,
+            RagRetrievalLogRepository ragRetrievalLogRepository) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
         ContentRetriever selectedRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
-        // 실제 검색은 selectedRetriever에 위임하고, LLM에 넘어가는 검색 결과만 로그로 남긴다.
-        this.contentRetriever = new EgovLoggingContentRetriever(selectedRetriever);
+        // 실제 검색은 selectedRetriever에 위임하고, LLM에 넘어가는 검색 결과는 로그+감사
+        // 테이블(rag_retrieval_logs)에 남긴다.
+        this.contentRetriever = new EgovLoggingContentRetriever(selectedRetriever, ragRetrievalLogRepository);
         this.chatMemoryStore = chatMemoryStore;
         this.defaultStreamingModel = defaultStreamingModel;
 
