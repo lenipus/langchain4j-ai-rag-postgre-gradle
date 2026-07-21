@@ -5,10 +5,16 @@ import com.example.chat.repository.PersistentChatMemoryStore;
 import com.example.chat.repository.RagRetrievalLogRepository;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.rag.DefaultRetrievalAugmentor;
+import dev.langchain4j.rag.RetrievalAugmentor;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
+import dev.langchain4j.rag.query.Query;
+import dev.langchain4j.rag.query.transformer.CompressingQueryTransformer;
+import dev.langchain4j.rag.query.transformer.QueryTransformer;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.RequiredArgsConstructor;
@@ -19,8 +25,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 챗봇 인스턴스 생성 Factory
@@ -36,6 +44,10 @@ public class ChatbotFactory {
     private final RagRetrievalLogRepository ragRetrievalLogRepository;
     private final PersistentChatMemoryStore chatMemoryStore;
     private final StreamingChatModel defaultStreamingModel;
+    private final ChatModel queryCompressionChatModel;
+
+    @Value("${rag.query-compression.enabled:true}")
+    private boolean queryCompressionEnabled;
 
     @Value("${langchain4j.ollama.chat-model.base-url}")
     private String chatModelBaseUrl;
@@ -74,6 +86,7 @@ public class ChatbotFactory {
             @Qualifier("contentRetriever") ContentRetriever denseContentRetriever,
             PersistentChatMemoryStore chatMemoryStore,
             StreamingChatModel defaultStreamingModel,
+            ChatModel queryCompressionChatModel,
             RagRetrievalLogRepository ragRetrievalLogRepository) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
         // 실제 EgovLoggingContentRetriever는 질의(턴)마다 turnId를 새로 발급해 createRagChatbot()에서
@@ -82,6 +95,7 @@ public class ChatbotFactory {
         this.ragRetrievalLogRepository = ragRetrievalLogRepository;
         this.chatMemoryStore = chatMemoryStore;
         this.defaultStreamingModel = defaultStreamingModel;
+        this.queryCompressionChatModel = queryCompressionChatModel;
 
         if (hybridContentRetriever != null) {
             log.info("ChatbotFactory - 하이브리드 ContentRetriever 사용");
@@ -106,14 +120,52 @@ public class ChatbotFactory {
         // 찍혀서, "이 질문/답변에 실제로 RAG가 뭘 검색해줬는지"를 정확히 조인해 추적할 수 있다.
         String turnId = UUID.randomUUID().toString();
 
-        log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}, 턴: {}",
-                isDefaultModel(modelName) ? defaultModelName : modelName, sessionId, turnId);
+        log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}, 턴: {}, 질의 압축: {}",
+                isDefaultModel(modelName) ? defaultModelName : modelName, sessionId, turnId, queryCompressionEnabled);
 
-        return AiServices.builder(RagChatbot.class)
+        // 질의 압축이 켜져 있으면 검색엔 압축된 질의가 쓰이므로, 사용자가 실제로 입력한
+        // 원본 질의는 압축 단계(queryTransformer)에서 이 홀더에 채워 넣고
+        // EgovLoggingContentRetriever가 감사 로그에 같이 남길 때 읽어간다.
+        AtomicReference<String> originalQueryTextHolder = new AtomicReference<>();
+
+        ContentRetriever loggingRetriever = new EgovLoggingContentRetriever(
+                selectedRetriever, ragRetrievalLogRepository, sessionId, turnId, originalQueryTextHolder);
+
+        AiServices<RagChatbot> builder = AiServices.builder(RagChatbot.class)
                 .streamingChatModel(streamingModel)
-                .contentRetriever(new EgovLoggingContentRetriever(selectedRetriever, ragRetrievalLogRepository, sessionId, turnId))
-                .chatMemory(createChatMemory(sessionId, turnId))
-                .build();
+                .chatMemory(createChatMemory(sessionId, turnId));
+
+        if (queryCompressionEnabled) {
+            // 후속 질문(대명사·생략형)이 이전 대화를 반영 못 한 채 그대로 검색되는 문제를
+            // 완화하기 위해, 검색 전에 (이전 대화 + 현재 질문)을 독립형 질문으로 압축한다.
+            RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
+                    .queryTransformer(loggingQueryTransformer(
+                            new CompressingQueryTransformer(queryCompressionChatModel), originalQueryTextHolder))
+                    .contentRetriever(loggingRetriever)
+                    .build();
+            builder.retrievalAugmentor(retrievalAugmentor);
+        } else {
+            builder.contentRetriever(loggingRetriever);
+        }
+
+        return builder.build();
+    }
+
+    /**
+     * {@link QueryTransformer} 데코레이터. 압축 전/후 질의를 로그로 남기고, 원본 질의는
+     * {@code originalQueryTextHolder}에 채워 넣어 {@link EgovLoggingContentRetriever}가
+     * {@code rag_retrieval_logs.original_query_text}에 같이 저장할 수 있게 한다.
+     */
+    private QueryTransformer loggingQueryTransformer(QueryTransformer delegate,
+                                                      AtomicReference<String> originalQueryTextHolder) {
+        return query -> {
+            originalQueryTextHolder.set(query.text());
+            Collection<Query> transformed = delegate.transform(query);
+            for (Query t : transformed) {
+                log.info("질의 압축 - 원본: [{}] -> 압축: [{}]", query.text(), t.text());
+            }
+            return transformed;
+        };
     }
 
     /**

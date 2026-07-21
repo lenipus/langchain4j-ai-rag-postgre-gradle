@@ -42,8 +42,18 @@ public class RagRetrievalLogEntity {
     @Column(name = "turn_id", length = 36)
     private String turnId;
 
+    /**
+     * 실제 검색에 쓰인 질의 텍스트. {@code rag.query-compression.enabled=true}면
+     * 사용자가 친 원문이 아니라 이전 대화를 반영해 LLM이 재작성(압축)한 독립형 질문이다.
+     */
     @Column(name = "query_text", columnDefinition = "TEXT")
     private String queryText;
+
+    /**
+     * 사용자가 실제로 입력한 원본 질의. 질의 압축이 꺼져 있으면 {@link #queryText}와 같다.
+     */
+    @Column(name = "original_query_text", columnDefinition = "TEXT")
+    private String originalQueryText;
 
     @Column(name = "file_name")
     private String fileName;
@@ -62,10 +72,12 @@ public class RagRetrievalLogEntity {
         retrievedAt = LocalDateTime.now();
     }
 
-    public RagRetrievalLogEntity(String sessionId, String turnId, String queryText, String fileName, Double score, String chunkText) {
+    public RagRetrievalLogEntity(String sessionId, String turnId, String queryText, String originalQueryText,
+                                  String fileName, Double score, String chunkText) {
         this.sessionId = sessionId;
         this.turnId = turnId;
         this.queryText = queryText;
+        this.originalQueryText = originalQueryText;
         this.fileName = fileName;
         this.score = score;
         this.chunkText = chunkText;

@@ -113,6 +113,12 @@ rag:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
   top-k: 6
 
+  # 후속 질문(대명사·생략형 등)이 이전 대화 맥락을 반영하지 못한 채 그대로 벡터 검색에
+  # 들어가 엉뚱한 문서를 끌어오는 문제 완화용. true면 검색 전에 CompressingQueryTransformer가
+  # (이전 대화 + 현재 질문)을 독립형 질문으로 압축해서 검색한다. LLM 호출이 하나 늘어난다.
+  query-compression:
+    enabled: true
+
   # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
   retrieval:
     overfetch-multiplier: 3

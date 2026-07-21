@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * ContentRetriever 데코레이터. 실제 검색은 delegate에 그대로 위임하고, LLM에 넘어가는
@@ -26,6 +27,11 @@ import java.util.List;
  * (역컴파일로 확인: {@code findMemoryId(...).orElse("default")}). 그래서 chat_memory
  * 테이블은 ChatMemory 자신의 {@code .id(sessionId)}를 통해 실제 세션ID가 들어가는데,
  * 여기서 그 값을 읽으려 하면 항상 "default"만 찍히는 버그가 있었다.</p>
+ *
+ * <p>{@code originalQueryTextHolder}는 질의 압축(query-compression) 사용 시, 검색에
+ * 실제로 쓰인(압축된) 질의와 별개로 사용자가 원래 입력한 질문도 같이 남기기 위한
+ * 값이다. {@code ChatbotFactory}가 압축 단계에서 채워 넣는다 - 압축이 꺼져 있으면
+ * null이거나 값이 없으므로, 그때는 검색에 쓰인 질의를 그대로 원본으로도 기록한다.</p>
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -37,6 +43,7 @@ public class EgovLoggingContentRetriever implements ContentRetriever {
     private final RagRetrievalLogRepository ragRetrievalLogRepository;
     private final String sessionId;
     private final String turnId;
+    private final AtomicReference<String> originalQueryTextHolder;
 
     @Override
     public List<Content> retrieve(Query query) {
@@ -49,6 +56,10 @@ public class EgovLoggingContentRetriever implements ContentRetriever {
 
         log.info("RAG 검색 결과 {}건 - 쿼리: {}", results.size(), query.text());
 
+        String originalQueryText = (originalQueryTextHolder != null && originalQueryTextHolder.get() != null)
+                ? originalQueryTextHolder.get()
+                : query.text();
+
         for (Content content : results) {
             String fileName = content.textSegment().metadata().getString("file_name");
             Object score = content.metadata().get(dev.langchain4j.rag.content.ContentMetadata.SCORE);
@@ -57,7 +68,7 @@ public class EgovLoggingContentRetriever implements ContentRetriever {
 
             log.info("  - file={}, score={}, length={}, text={}", fileName, score, text.length(), preview);
 
-            persistLog(sessionId, query.text(), fileName, score, text);
+            persistLog(sessionId, query.text(), originalQueryText, fileName, score, text);
         }
 
         return results;
@@ -66,11 +77,12 @@ public class EgovLoggingContentRetriever implements ContentRetriever {
     /**
      * 감사 로그 저장 실패가 RAG 응답 자체를 막으면 안 되므로, 예외는 로그만 남기고 삼킨다.
      */
-    private void persistLog(String sessionId, String queryText, String fileName, Object score, String chunkText) {
+    private void persistLog(String sessionId, String queryText, String originalQueryText,
+                             String fileName, Object score, String chunkText) {
         try {
             Double scoreValue = (score instanceof Number number) ? number.doubleValue() : null;
             ragRetrievalLogRepository.save(
-                    new RagRetrievalLogEntity(sessionId, turnId, queryText, fileName, scoreValue, chunkText));
+                    new RagRetrievalLogEntity(sessionId, turnId, queryText, originalQueryText, fileName, scoreValue, chunkText));
         } catch (Exception e) {
             log.warn("RAG 검색 결과 감사 로그 저장 실패 - 세션: {}, 원인: {}", sessionId, e.getMessage());
         }

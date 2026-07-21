@@ -39,7 +39,7 @@ class EgovLoggingContentRetrieverTest {
         List<Content> expected = List.of(Content.from(TextSegment.from("부 칙 제1조...")));
         when(delegate.retrieve(query)).thenReturn(expected);
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1");
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1", null);
         List<Content> result = retriever.retrieve(query);
 
         assertThat(result).isEqualTo(expected);
@@ -52,7 +52,7 @@ class EgovLoggingContentRetrieverTest {
         Query query = Query.from("겸직허가 규정 좀 알려줘");
         when(delegate.retrieve(query)).thenReturn(List.of());
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1");
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1", null);
         List<Content> result = retriever.retrieve(query);
 
         assertThat(result).isEmpty();
@@ -69,7 +69,7 @@ class EgovLoggingContentRetrieverTest {
         Query query = Query.from("휴가 결재선이 어떻게 돼??");
         when(delegate.retrieve(query)).thenReturn(List.of(content));
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-abc", "turn-1");
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-abc", "turn-1", null);
         retriever.retrieve(query);
 
         ArgumentCaptor<RagRetrievalLogEntity> captor = ArgumentCaptor.forClass(RagRetrievalLogEntity.class);
@@ -83,6 +83,43 @@ class EgovLoggingContentRetrieverTest {
     }
 
     @Test
+    @DisplayName("originalQueryTextHolder가 없으면(질의 압축 꺼짐) 원본 질의는 검색에 쓰인 질의와 같다")
+    void fallsBackToQueryTextWhenNoOriginalQueryHolder() {
+        ContentRetriever delegate = mock(ContentRetriever.class);
+        Content content = Content.from(TextSegment.from("제5조..."));
+        Query query = Query.from("겸직허가 규정 좀 알려줘");
+        when(delegate.retrieve(query)).thenReturn(List.of(content));
+
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1", null);
+        retriever.retrieve(query);
+
+        ArgumentCaptor<RagRetrievalLogEntity> captor = ArgumentCaptor.forClass(RagRetrievalLogEntity.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getOriginalQueryText()).isEqualTo("겸직허가 규정 좀 알려줘");
+    }
+
+    @Test
+    @DisplayName("originalQueryTextHolder에 값이 있으면(질의 압축 켜짐) 압축된 질의와 별개로 원본도 같이 저장한다")
+    void savesOriginalQueryTextFromHolderWhenCompressionEnabled() {
+        ContentRetriever delegate = mock(ContentRetriever.class);
+        Content content = Content.from(TextSegment.from("제5조..."));
+        Query compressedQuery = Query.from("한국통계정보원의 주소를 알려주세요.");
+        when(delegate.retrieve(compressedQuery)).thenReturn(List.of(content));
+        java.util.concurrent.atomic.AtomicReference<String> originalQueryTextHolder =
+                new java.util.concurrent.atomic.AtomicReference<>("주소 몰라?? 주소좀 알려줘");
+
+        EgovLoggingContentRetriever retriever =
+                new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1", originalQueryTextHolder);
+        retriever.retrieve(compressedQuery);
+
+        ArgumentCaptor<RagRetrievalLogEntity> captor = ArgumentCaptor.forClass(RagRetrievalLogEntity.class);
+        verify(repository).save(captor.capture());
+        RagRetrievalLogEntity saved = captor.getValue();
+        assertThat(saved.getQueryText()).isEqualTo("한국통계정보원의 주소를 알려주세요.");
+        assertThat(saved.getOriginalQueryText()).isEqualTo("주소 몰라?? 주소좀 알려줘");
+    }
+
+    @Test
     @DisplayName("감사 로그 저장이 실패해도 검색 결과 반환에는 영향이 없다")
     void ignoresAuditLogFailure() {
         ContentRetriever delegate = mock(ContentRetriever.class);
@@ -91,7 +128,7 @@ class EgovLoggingContentRetrieverTest {
         when(delegate.retrieve(query)).thenReturn(expected);
         when(repository.save(any())).thenThrow(new RuntimeException("DB 연결 끊김"));
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1");
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1", null);
         List<Content> result = retriever.retrieve(query);
 
         assertThat(result).isEqualTo(expected);
