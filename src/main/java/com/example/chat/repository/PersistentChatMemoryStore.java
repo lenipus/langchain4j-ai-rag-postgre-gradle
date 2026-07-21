@@ -60,6 +60,18 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     private static final String RAG_INJECTION_MARKER = "\n\nAnswer using the following information:\n";
 
     /**
+     * 메시지 업데이트 (턴 키 없이 - 단순 채팅 등 RAG를 쓰지 않는 흐름용).
+     *
+     * @param memoryId 세션 ID
+     * @param messages 저장할 메시지 리스트 (마지막 원소 = 방금 추가된 메시지)
+     */
+    @Override
+    @Transactional
+    public void updateMessages(Object memoryId, List<ChatMessage> messages) {
+        updateMessages(memoryId, messages, null);
+    }
+
+    /**
      * 메시지 업데이트
      *
      * <p>{@link dev.langchain4j.memory.chat.MessageWindowChatMemory#add(ChatMessage)}는 매번
@@ -78,14 +90,24 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
      * 과거 턴들의 검색 결과는 세션이 길어져도 계속 쌓이지 않아 컨텍스트 윈도우 초과
      * (예: "40036 tokens exceeds ... 32768") 문제를 완화한다.</p>
      *
+     * <p>{@code turnId}는 이번 요청(질의) 하나를 위해 {@code ChatbotFactory}가 새로 발급한
+     * 키다. 이 메서드는 매번 세션의 전체 메시지를 지우고 다시 쓰므로, 이미 저장돼 있던(과거
+     * 턴의) 메시지는 삭제 전에 조회해 그 turn_id를 그대로 이어받고, 이번 호출에서 "새로"
+     * 생긴 메시지(기존 개수 이후의 원소)에만 이번 turnId를 찍는다. 그래서 1번(사용자 메시지
+     * add) 때는 그 메시지 하나만, 2번(AI 메시지 add) 때는 그 사용자 메시지(과거 저장분을
+     * 이어받아 여전히 같은 turnId)와 새로 추가된 AI 메시지 둘 다 같은 turnId를 갖게 된다.</p>
+     *
      * @param memoryId 세션 ID
      * @param messages 저장할 메시지 리스트 (마지막 원소 = 방금 추가된 메시지)
+     * @param turnId   이번 질의(턴)의 고유 키. null이면 turn_id를 찍지 않는다(RAG 미사용 흐름).
      */
-    @Override
     @Transactional
-    public void updateMessages(Object memoryId, List<ChatMessage> messages) {
+    public void updateMessages(Object memoryId, List<ChatMessage> messages, String turnId) {
         String sessionId = memoryId.toString();
         // log.debug("채팅 메모리 업데이트 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
+
+        List<ChatMemoryEntity> existing = chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        int existingCount = existing.size();
 
         // 기존 메시지 삭제
         chatMemoryRepository.deleteBySessionId(sessionId);
@@ -94,7 +116,9 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         int lastIndex = messages.size() - 1;
         for (int i = 0; i < messages.size(); i++) {
             boolean isLatest = (i == lastIndex);
-            ChatMemoryEntity entity = convertToEntity(sessionId, messages.get(i), isLatest);
+            // 이미 있던 메시지는 예전 turn_id를 이어받고, 이번에 새로 생긴 메시지만 이번 turnId를 찍는다.
+            String effectiveTurnId = (i < existingCount) ? existing.get(i).getTurnId() : turnId;
+            ChatMemoryEntity entity = convertToEntity(sessionId, messages.get(i), isLatest, effectiveTurnId);
             if (entity != null) {
                 chatMemoryRepository.save(entity);
             }
@@ -140,8 +164,9 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
      *
      * @param isLatest 이 배치에서 방금 추가된(가장 마지막) 메시지인지 여부. 사용자 메시지이면서
      *                 이게 false일 때만(=과거 턴) RAG 삽입 텍스트를 잘라낸다.
+     * @param turnId   이 메시지가 속한 질의(턴)의 고유 키 (없으면 null)
      */
-    private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message, boolean isLatest) {
+    private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message, boolean isLatest, String turnId) {
         String messageType;
         String content;
 
@@ -159,7 +184,9 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
             return null;
         }
 
-        return new ChatMemoryEntity(sessionId, messageType, content);
+        ChatMemoryEntity entity = new ChatMemoryEntity(sessionId, messageType, content);
+        entity.setTurnId(turnId);
+        return entity;
     }
 
     private String stripRagInjection(String text) {

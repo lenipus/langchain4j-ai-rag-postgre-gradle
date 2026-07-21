@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EgovChatSessionServiceImplTitleTest {
 
     private final EgovChatSessionServiceImpl service =
-            new EgovChatSessionServiceImpl(null, null);
+            new EgovChatSessionServiceImpl(null, null, null);
 
     @Test
     @DisplayName("null 입력이면 기본 제목 '새 채팅'을 반환한다")

@@ -6,10 +6,12 @@ import com.example.chat.entity.ChatMemoryEntity;
 import com.example.chat.entity.ChatSessionEntity;
 import com.example.chat.repository.ChatMemoryRepository;
 import com.example.chat.repository.ChatSessionRepository;
+import com.example.chat.repository.RagRetrievalLogRepository;
 import com.example.chat.service.EgovChatSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,11 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
 
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMemoryRepository chatMemoryRepository;
+    private final RagRetrievalLogRepository ragRetrievalLogRepository;
+
+    /** 세션 삭제 시 그 세션의 RAG 검색 감사 로그(rag_retrieval_logs)도 같이 지울지 여부. */
+    @Value("${rag.retrieval-log.delete-with-session:true}")
+    private boolean deleteRagLogWithSession;
 
     @Override
     @Transactional
@@ -138,9 +145,15 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
         // 채팅 메모리 삭제 (cascade)
         chatMemoryRepository.deleteBySessionId(sessionId);
 
+        // RAG 검색 감사 로그(rag_retrieval_logs)도 같이 정리할지는 설정으로 결정한다.
+        // chat_memory와는 별개 테이블이라 DB상 외래키로 묶여있지 않으므로 명시적으로 지운다.
+        if (deleteRagLogWithSession) {
+            ragRetrievalLogRepository.deleteBySessionId(sessionId);
+        }
+
         // 세션 삭제
         chatSessionRepository.deleteById(sessionId);
 
-        log.debug("세션 삭제: {}", sessionId);
+        log.debug("세션 삭제: {} (RAG 로그 삭제: {})", sessionId, deleteRagLogWithSession);
     }
 }

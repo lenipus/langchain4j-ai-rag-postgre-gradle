@@ -3,12 +3,15 @@ package com.example.chat.service;
 import com.example.chat.config.EgovLoggingContentRetriever;
 import com.example.chat.repository.PersistentChatMemoryStore;
 import com.example.chat.repository.RagRetrievalLogRepository;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.service.AiServices;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,6 +19,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * 챗봇 인스턴스 생성 Factory
@@ -27,7 +32,8 @@ import java.time.Duration;
 @Component
 public class ChatbotFactory {
 
-    private final ContentRetriever contentRetriever;
+    private final ContentRetriever selectedRetriever;
+    private final RagRetrievalLogRepository ragRetrievalLogRepository;
     private final PersistentChatMemoryStore chatMemoryStore;
     private final StreamingChatModel defaultStreamingModel;
 
@@ -70,10 +76,10 @@ public class ChatbotFactory {
             StreamingChatModel defaultStreamingModel,
             RagRetrievalLogRepository ragRetrievalLogRepository) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
-        ContentRetriever selectedRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
-        // 실제 검색은 selectedRetriever에 위임하고, LLM에 넘어가는 검색 결과는 로그+감사
-        // 테이블(rag_retrieval_logs)에 남긴다.
-        this.contentRetriever = new EgovLoggingContentRetriever(selectedRetriever, ragRetrievalLogRepository);
+        // 실제 EgovLoggingContentRetriever는 질의(턴)마다 turnId를 새로 발급해 createRagChatbot()에서
+        // 매번 새로 감싸 만든다 (아래 selectedRetriever는 그 delegate로만 쓰인다).
+        this.selectedRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
+        this.ragRetrievalLogRepository = ragRetrievalLogRepository;
         this.chatMemoryStore = chatMemoryStore;
         this.defaultStreamingModel = defaultStreamingModel;
 
@@ -96,13 +102,17 @@ public class ChatbotFactory {
                 ? defaultStreamingModel
                 : createStreamingModel(modelName);
 
-        log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}",
-                isDefaultModel(modelName) ? defaultModelName : modelName, sessionId);
+        // 이 질의(턴) 하나를 위한 키. rag_retrieval_logs와 chat_memory 양쪽에 같은 값이
+        // 찍혀서, "이 질문/답변에 실제로 RAG가 뭘 검색해줬는지"를 정확히 조인해 추적할 수 있다.
+        String turnId = UUID.randomUUID().toString();
+
+        log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}, 턴: {}",
+                isDefaultModel(modelName) ? defaultModelName : modelName, sessionId, turnId);
 
         return AiServices.builder(RagChatbot.class)
                 .streamingChatModel(streamingModel)
-                .contentRetriever(contentRetriever)
-                .chatMemory(createChatMemory(sessionId))
+                .contentRetriever(new EgovLoggingContentRetriever(selectedRetriever, ragRetrievalLogRepository, sessionId, turnId))
+                .chatMemory(createChatMemory(sessionId, turnId))
                 .build();
     }
 
@@ -128,7 +138,7 @@ public class ChatbotFactory {
     }
 
     /**
-     * MessageWindowChatMemory 생성
+     * MessageWindowChatMemory 생성 (턴 키 없이 - 단순 채팅용)
      * - 최근 N개 메시지만 유지
      * - PersistentChatMemoryStore를 통해 PostgreSQL에 자동 저장
      */
@@ -138,6 +148,46 @@ public class ChatbotFactory {
                 .maxMessages(maxMessages)
                 .chatMemoryStore(chatMemoryStore)
                 .build();
+    }
+
+    /**
+     * MessageWindowChatMemory 생성 (RAG용)
+     * - chatMemoryStore를 turnId로 감싸, 이 턴에서 저장되는 메시지에 turnId가 찍히게 한다.
+     */
+    private MessageWindowChatMemory createChatMemory(String sessionId, String turnId) {
+        return MessageWindowChatMemory.builder()
+                .id(sessionId)
+                .maxMessages(maxMessages)
+                .chatMemoryStore(new TurnTaggingChatMemoryStore(chatMemoryStore, turnId))
+                .build();
+    }
+
+    /**
+     * {@link ChatMemoryStore} 데코레이터. updateMessages()만 가로채 이번 질의(턴)의
+     * turnId를 넘겨주고, 나머지는 delegate에 그대로 위임한다. createRagChatbot() 호출마다
+     * 새로 만들어져 turnId를 클로저로 들고 있으므로, 실제 저장이 어느 스레드에서
+     * 일어나든(ThreadLocal과 달리) 안전하게 전달된다.
+     */
+    @RequiredArgsConstructor
+    private static class TurnTaggingChatMemoryStore implements ChatMemoryStore {
+
+        private final PersistentChatMemoryStore delegate;
+        private final String turnId;
+
+        @Override
+        public List<ChatMessage> getMessages(Object memoryId) {
+            return delegate.getMessages(memoryId);
+        }
+
+        @Override
+        public void updateMessages(Object memoryId, List<ChatMessage> messages) {
+            delegate.updateMessages(memoryId, messages, turnId);
+        }
+
+        @Override
+        public void deleteMessages(Object memoryId) {
+            delegate.deleteMessages(memoryId);
+        }
     }
 
     /**

@@ -50,3 +50,13 @@ CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated
 -- GRANT USAGE, CREATE ON SCHEMA public TO tester;
 -- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO tester;
 -- ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO tester;
+--
+-- 주의: 위 GRANT문은 SELECT/INSERT/UPDATE/DELETE 같은 "데이터 조작 권한"만 부여할 뿐,
+-- ALTER TABLE(컬럼 추가 등 스키마 변경)은 오너 또는 슈퍼유저만 할 수 있어 위 GRANT로는
+-- 해결되지 않는다. ddl-auto: update가 이 테이블들에 새 컬럼을 추가하려 할 때
+-- "must be owner of table ..." 에러가 나는 건 이 때문이다. 스키마 변경 권한까지 필요하면
+-- 아래처럼 소유권 자체를 tester로 넘겨야 한다(관리자 계정으로 실행).
+--
+-- ALTER TABLE chat_memory OWNER TO tester;
+-- ALTER TABLE chat_sessions OWNER TO tester;
+-- ALTER TABLE document_hashes OWNER TO tester;

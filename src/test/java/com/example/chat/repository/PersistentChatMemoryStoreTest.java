@@ -10,10 +10,13 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
+import java.time.LocalDateTime;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * {@link PersistentChatMemoryStore#updateMessages(Object, List)}가 "현재 턴"의 RAG 삽입
@@ -88,5 +91,40 @@ class PersistentChatMemoryStoreTest {
         List<ChatMemoryEntity> secondSaved = secondCaptor.getAllValues().subList(1, 3);
         assertThat(secondSaved.get(0).getContent()).isEqualTo("휴가 결재선이 어떻게 돼??");
         assertThat(secondSaved.get(1).getContent()).isEqualTo("결재선은 팀장-부서장-본부장 순입니다.");
+    }
+
+    @Test
+    @DisplayName("turnId를 지정해 호출하면 새로 추가되는 메시지에 그 turnId가 찍힌다")
+    void stampsProvidedTurnIdOnNewMessage() {
+        ChatMessage userMessage = UserMessage.from("겸직허가 규정 좀 알려줘");
+
+        store.updateMessages("session-4", List.of(userMessage), "turn-A");
+
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository).save(captor.capture());
+        assertThat(captor.getValue().getTurnId()).isEqualTo("turn-A");
+    }
+
+    @Test
+    @DisplayName("이미 저장돼 있던 메시지는 새 turnId로 다시 저장돼도 원래 turnId를 그대로 유지한다")
+    void preservesExistingTurnIdForAlreadyStoredMessage() {
+        ChatMemoryEntity previouslyStoredUserMessage = new ChatMemoryEntity("session-5", "USER", "휴가 결재선이 어떻게 돼??" + MARKER + "결재라인...");
+        previouslyStoredUserMessage.setTurnId("turn-A");
+        previouslyStoredUserMessage.setCreatedAt(LocalDateTime.now());
+        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-5"))
+                .thenReturn(List.of(previouslyStoredUserMessage));
+
+        ChatMessage sameUserMessage = UserMessage.from("휴가 결재선이 어떻게 돼??" + MARKER + "결재라인...");
+        ChatMessage newAiMessage = AiMessage.from("결재선은 팀장-부서장-본부장 순입니다.");
+
+        // 2차 add(): AI 메시지가 새로 추가되는 이 호출에서도 turnId는 여전히 "turn-A"로 같다
+        // (같은 요청 안에서 발급된 하나의 turnId를 ChatbotFactory가 재사용하기 때문).
+        store.updateMessages("session-5", List.of(sameUserMessage, newAiMessage), "turn-A");
+
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository, times(2)).save(captor.capture());
+        List<ChatMemoryEntity> saved = captor.getAllValues();
+        assertThat(saved.get(0).getTurnId()).isEqualTo("turn-A"); // 과거 저장분 turnId 유지
+        assertThat(saved.get(1).getTurnId()).isEqualTo("turn-A"); // 새로 추가된 AI 메시지도 같은 turnId
     }
 }

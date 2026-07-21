@@ -17,7 +17,8 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "rag_retrieval_logs", indexes = {
-        @Index(name = "idx_rag_retrieval_logs_session_id", columnList = "session_id")
+        @Index(name = "idx_rag_retrieval_logs_session_id", columnList = "session_id"),
+        @Index(name = "idx_rag_retrieval_logs_turn_id", columnList = "turn_id")
 })
 @Data
 @NoArgsConstructor
@@ -30,6 +31,16 @@ public class RagRetrievalLogEntity {
 
     @Column(name = "session_id", length = 36)
     private String sessionId;
+
+    /**
+     * 이 검색 결과가 발생한 "그 질의(턴)"의 고유 키. 같은 세션에서 여러 번 질의해도
+     * 매번 새로 발급되므로, session_id + 시각 순서로 대충 묶어보던 것과 달리 정확히
+     * 어떤 질의 하나에 딸린 검색 결과인지 특정할 수 있다. chat_memory.turn_id와
+     * 같은 값이 찍히므로 두 테이블을 이 값으로 조인해 "이 질문/답변에 실제로 뭐가
+     * 검색됐는지"를 정확히 추적할 수 있다.
+     */
+    @Column(name = "turn_id", length = 36)
+    private String turnId;
 
     @Column(name = "query_text", columnDefinition = "TEXT")
     private String queryText;
@@ -51,8 +62,9 @@ public class RagRetrievalLogEntity {
         retrievedAt = LocalDateTime.now();
     }
 
-    public RagRetrievalLogEntity(String sessionId, String queryText, String fileName, Double score, String chunkText) {
+    public RagRetrievalLogEntity(String sessionId, String turnId, String queryText, String fileName, Double score, String chunkText) {
         this.sessionId = sessionId;
+        this.turnId = turnId;
         this.queryText = queryText;
         this.fileName = fileName;
         this.score = score;

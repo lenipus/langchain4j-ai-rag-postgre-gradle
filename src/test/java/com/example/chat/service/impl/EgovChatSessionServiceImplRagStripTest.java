@@ -26,7 +26,7 @@ class EgovChatSessionServiceImplRagStripTest {
 
     private final ChatMemoryRepository chatMemoryRepository = mock(ChatMemoryRepository.class);
     private final EgovChatSessionServiceImpl service =
-            new EgovChatSessionServiceImpl(null, chatMemoryRepository);
+            new EgovChatSessionServiceImpl(null, chatMemoryRepository, null);
 
     @Test
     @DisplayName("USER 메시지의 RAG 삽입 텍스트는 화면 조회 시 잘려나간다")

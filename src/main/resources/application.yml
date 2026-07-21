@@ -109,7 +109,6 @@ document:
 
 # RAG 설정
 rag:
-  enable-query-compression: false
   similarity:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
   top-k: 6
@@ -120,13 +119,19 @@ rag:
     min-chunk-length: 250
 
     hybrid:
+      # lexical(pg_trgm)이 한국어 문법적 어미 패턴까지 매칭해 무관한 문서를 끌어올리는
+      # 문제가 gemma/bgem3 두 임베딩 프로필 모두, 가중치를 낮춰도 반복 확인돼 껐다.
       enabled: false
       weight:
         dense: 1.0
-        lexical: 1.0
+        lexical: 0.2
       top-k: 6
       lexical:
         word-similarity-threshold: 0.10
+
+  # RAG 검색 감사 로그(rag_retrieval_logs, EgovLoggingContentRetriever가 기록) 관련 설정.
+  retrieval-log:
+    delete-with-session: true
 
 # 채팅 메모리 설정
 chat:

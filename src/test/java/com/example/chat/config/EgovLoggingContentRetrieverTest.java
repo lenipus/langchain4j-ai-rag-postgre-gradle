@@ -2,7 +2,6 @@ package com.example.chat.config;
 
 import com.example.chat.entity.RagRetrievalLogEntity;
 import com.example.chat.repository.RagRetrievalLogRepository;
-import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
@@ -23,7 +22,10 @@ import static org.mockito.Mockito.*;
  *
  * <p>이 감사 테이블은 {@code chat_memory}와 달리 LLM에 재전송되지 않으므로, 세션이
  * 길어져도 컨텍스트 윈도우와 무관하게 "이 질문 때 뭐가 검색됐는지"를 나중에 조회할
- * 수 있게 해준다.</p>
+ * 수 있게 해준다. 생성자의 sessionId/turnId는 이 인스턴스가 담당하는 요청/질의(턴)
+ * 하나의 키로, 저장되는 모든 행에 그대로 찍힌다. {@code query.metadata().chatMemoryId()}는
+ * 쓰지 않는다 - langchain4j가 {@code @MemoryId} 파라미터 없는 서비스 메서드에는
+ * 이 값을 무조건 "default"로 채우는 동작이 있어서다.</p>
  */
 class EgovLoggingContentRetrieverTest {
 
@@ -37,7 +39,7 @@ class EgovLoggingContentRetrieverTest {
         List<Content> expected = List.of(Content.from(TextSegment.from("부 칙 제1조...")));
         when(delegate.retrieve(query)).thenReturn(expected);
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository);
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1");
         List<Content> result = retriever.retrieve(query);
 
         assertThat(result).isEqualTo(expected);
@@ -50,7 +52,7 @@ class EgovLoggingContentRetrieverTest {
         Query query = Query.from("겸직허가 규정 좀 알려줘");
         when(delegate.retrieve(query)).thenReturn(List.of());
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository);
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1");
         List<Content> result = retriever.retrieve(query);
 
         assertThat(result).isEmpty();
@@ -64,18 +66,17 @@ class EgovLoggingContentRetrieverTest {
         dev.langchain4j.data.document.Metadata segmentMetadata =
                 dev.langchain4j.data.document.Metadata.from("file_name", "결재라인.txt");
         Content content = Content.from(TextSegment.from("복무 결재라인 안내...", segmentMetadata));
-        Query query = Query.from("휴가 결재선이 어떻게 돼??",
-                dev.langchain4j.rag.query.Metadata.from(
-                        UserMessage.from("휴가 결재선이 어떻게 돼??"), "session-abc", List.of()));
+        Query query = Query.from("휴가 결재선이 어떻게 돼??");
         when(delegate.retrieve(query)).thenReturn(List.of(content));
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository);
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-abc", "turn-1");
         retriever.retrieve(query);
 
         ArgumentCaptor<RagRetrievalLogEntity> captor = ArgumentCaptor.forClass(RagRetrievalLogEntity.class);
         verify(repository).save(captor.capture());
         RagRetrievalLogEntity saved = captor.getValue();
         assertThat(saved.getSessionId()).isEqualTo("session-abc");
+        assertThat(saved.getTurnId()).isEqualTo("turn-1");
         assertThat(saved.getQueryText()).isEqualTo("휴가 결재선이 어떻게 돼??");
         assertThat(saved.getFileName()).isEqualTo("결재라인.txt");
         assertThat(saved.getChunkText()).isEqualTo("복무 결재라인 안내...");
@@ -90,7 +91,7 @@ class EgovLoggingContentRetrieverTest {
         when(delegate.retrieve(query)).thenReturn(expected);
         when(repository.save(any())).thenThrow(new RuntimeException("DB 연결 끊김"));
 
-        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository);
+        EgovLoggingContentRetriever retriever = new EgovLoggingContentRetriever(delegate, repository, "session-1", "turn-1");
         List<Content> result = retriever.retrieve(query);
 
         assertThat(result).isEqualTo(expected);
