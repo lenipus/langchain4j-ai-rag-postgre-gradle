@@ -50,25 +50,47 @@ class SqlGenServiceImplTest {
     }
 
     @Test
+    @DisplayName("설명이 코드블록 앞뒤에 같이 있어도(이제는 설명을 요청하므로) SQL만 정확히 추출한다")
+    void extractsSqlFromCodeFenceSurroundedByExplanation() {
+        String response = "이 요청은 최근 7일간 가입한 사용자 수를 세는 것이므로, users 테이블의 created_at을 기준으로 필터링했습니다.\n\n"
+                + "```sql\n"
+                + "SELECT count(*)\n"
+                + "FROM users\n"
+                + "WHERE created_at >= now() - interval '7 days';\n"
+                + "```\n\n"
+                + "이 쿼리는 인덱스가 있다면 빠르게 동작합니다.";
+        assertThat(service.extractSql(response))
+                .isEqualTo("SELECT count(*)\nFROM users\nWHERE created_at >= now() - interval '7 days';");
+    }
+
+    @Test
     @DisplayName("null 응답은 빈 문자열로 처리한다")
     void returnsEmptyStringForNullResponse() {
         assertThat(service.extractSql(null)).isEmpty();
     }
 
     @Test
-    @DisplayName("프롬프트에 테이블명과 컬럼(타입, PK, NULL 허용 여부)이 모두 들어간다")
+    @DisplayName("프롬프트(User 메시지)에 DBMS/테이블명/컬럼(타입, PK, NULLABLE 여부)/사용자 요청이 모두 들어간다")
     void buildsPromptWithTableAndColumnInfo() {
         TableSchemaDto schema = new TableSchemaDto("public.users", List.of(
                 new TableColumnDto("id", "bigint", false, true),
                 new TableColumnDto("name", "varchar", true, false)));
 
-        String prompt = service.buildPrompt(List.of(schema), "최근 7일간 가입한 사용자 수를 보여줘");
+        String prompt = service.buildPrompt(List.of(schema), "최근 7일간 가입한 사용자 수를 보여줘", "MariaDB");
 
+        assertThat(prompt).contains("대상 DBMS는 MariaDB입니다");
         assertThat(prompt).contains("public.users");
         assertThat(prompt).contains("id (bigint, PK, NOT NULL)");
         assertThat(prompt).contains("name (varchar, NULL 허용)");
-        assertThat(prompt).contains("최근 7일간 가입한 사용자 수를 보여줘");
-        assertThat(prompt).contains("SQL 쿼리 하나만 출력");
-        assertThat(prompt).contains("줄을 바꾸고 들여쓰기를 사용해");
+        assertThat(prompt).contains("사용자 요청: 최근 7일간 가입한 사용자 수를 보여줘");
+    }
+
+    @Test
+    @DisplayName("공통 절차적 지시사항(System 프롬프트)에는 형식 규칙이 한글로 들어있다 (영어와 실측 비교해 차이 없어 한글로 확정)")
+    void systemPromptContainsProceduralInstructionsInKorean() {
+        assertThat(com.example.sqlgen.service.SqlGenService.SQL_GEN_SYSTEM_PROMPT)
+                .contains("SQL 전문가")
+                .contains("```sql")
+                .contains("간단한 설명");
     }
 }

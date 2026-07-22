@@ -305,6 +305,21 @@ textarea {
     max-width: 90%;
     word-break: break-word;
 }
+.sql-raw-response {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.sql-raw-text-part {
+    background: #f5f5f5;
+    color: #444;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 .sql-result-wrapper {
     position: relative;
 }
@@ -321,15 +336,24 @@ textarea {
 }
 .sql-chat-input-row {
     display: flex;
-    gap: 8px;
     align-items: flex-end;
+    margin-top: 10px;
 }
 .sql-chat-input-row textarea {
     flex: 1;
     margin: 0;
+    padding: 10px;
+    font-size: 16px;
+    line-height: 1.4;
+    max-height: 150px;
+    overflow-y: auto;
+    resize: none;
 }
 .sql-chat-input-row .btn {
     margin-top: 0;
+    margin-left: 10px;
+    padding: 10px 20px;
+    font-size: 16px;
     flex: 0 0 auto;
 }
 

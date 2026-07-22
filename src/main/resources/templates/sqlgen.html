@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL 생성 도구</title>
-    <link rel="stylesheet" href="/css/sqlgen.css?v=6">
+    <link rel="stylesheet" href="/css/sqlgen.css?v=8">
 </head>
 <body>
     <div class="container">
@@ -54,8 +54,8 @@
                     </div>
 
                     <div class="sql-chat-input-row">
-                        <textarea id="nl-request" rows="3" placeholder="예: 최근 7일간 가입한 사용자 수를 보여줘"
-                                  onkeydown="handleSqlRequestKeyPress(event)"></textarea>
+                        <textarea id="nl-request" rows="1" placeholder="예: 최근 7일간 가입한 사용자 수를 보여줘 (Shift+Enter로 줄바꿈)"
+                                  onkeydown="handleSqlRequestKeyPress(event)" oninput="autoGrowSqlRequestInput(event)"></textarea>
                         <button class="btn btn-primary" id="generate-btn" onclick="generateSql()">SQL 생성</button>
                     </div>
                     <span id="generate-status" class="status-text"></span>
@@ -579,77 +579,64 @@
 
             generateBtn.disabled = true;
             statusEl.textContent = '';
-            const thinkingIntervalId = startSqlThinkingIndicator();
+            // 채팅 화면과 동일하게, 전송하는 순간 바로 입력창을 비운다(완료될 때까지 기다리지 않음).
+            nlRequestEl.value = '';
+            nlRequestEl.style.height = 'auto';
 
-            fetch('/api/sqlgen/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    connectionId: Number(connectionId),
-                    tableNames: Array.from(selectedTables),
-                    naturalLanguageRequest
-                })
-            })
-                .then(res => res.json().then(body => ({ ok: res.ok, body })))
-                .then(({ ok, body }) => {
-                    stopSqlThinkingIndicator(thinkingIntervalId);
-                    generateBtn.disabled = false;
-                    if (!ok) {
-                        statusEl.textContent = body.error || 'SQL 생성 실패';
-                        statusEl.className = 'status-text error';
-                        return;
-                    }
-                    statusEl.textContent = '';
-                    appendSqlHistoryEntry(naturalLanguageRequest, body.sql);
-                    nlRequestEl.value = '';
-                })
-                .catch(err => {
-                    stopSqlThinkingIndicator(thinkingIntervalId);
-                    generateBtn.disabled = false;
-                    statusEl.textContent = 'SQL 생성 중 오류: ' + err.message;
-                    statusEl.className = 'status-text error';
-                });
-        }
+            const { liveTextEl } = createSqlHistoryEntry(naturalLanguageRequest);
+            let thinkingIntervalId = startSqlThinkingIndicator(liveTextEl);
+            let fullResponse = '';
 
-        // 응답이 오기 전까지 점 애니메이션 + 순환 문구로 뭔가 진행 중임을 이력 영역에 바로 보여준다.
-        function startSqlThinkingIndicator() {
-            const historyEl = document.getElementById('sql-history');
-            const placeholder = historyEl.querySelector('.placeholder');
-            if (placeholder) {
-                placeholder.remove();
-            }
+            const params = new URLSearchParams();
+            params.append('connectionId', connectionId);
+            Array.from(selectedTables).forEach(tableName => params.append('tableNames', tableName));
+            params.append('naturalLanguageRequest', naturalLanguageRequest);
 
-            const phrases = ['테이블 스키마를 확인하고 있어요...', 'SQL을 작성하고 있어요...', '조금만 더 기다려주세요...'];
+            const eventSource = new EventSource(`/api/sqlgen/generate/stream?${params.toString()}`);
 
-            const entry = document.createElement('div');
-            entry.id = 'sql-thinking-entry';
-            entry.className = 'sql-history-entry';
-            entry.innerHTML = '<div class="thinking-indicator">' +
-                '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
-                '<span class="thinking-text">' + phrases[0] + '</span></div>';
-            historyEl.appendChild(entry);
-            historyEl.scrollTop = historyEl.scrollHeight;
-
-            let index = 0;
-            return setInterval(() => {
-                index = (index + 1) % phrases.length;
-                const textEl = entry.querySelector('.thinking-text');
-                if (textEl) {
-                    textEl.textContent = phrases[index];
+            eventSource.onmessage = function(event) {
+                if (thinkingIntervalId) {
+                    clearInterval(thinkingIntervalId);
+                    thinkingIntervalId = null;
                 }
-            }, 2500);
+                const data = JSON.parse(event.data);
+                fullResponse += data.token;
+                liveTextEl.textContent = fullResponse;
+                const historyEl = document.getElementById('sql-history');
+                historyEl.scrollTop = historyEl.scrollHeight;
+            };
+
+            // 서버가 스트림을 정상 종료해도 EventSource는 "연결 끊김"으로 인식해 onerror가
+            // 불린다 - 이 프로젝트의 채팅 화면(/ai/rag/stream)도 같은 방식으로 완료를 감지한다.
+            eventSource.onerror = function() {
+                eventSource.close();
+                generateBtn.disabled = false;
+                if (thinkingIntervalId) {
+                    clearInterval(thinkingIntervalId);
+                    thinkingIntervalId = null;
+                }
+
+                if (!fullResponse) {
+                    liveTextEl.textContent = 'SQL 생성 중 오류가 발생했습니다.';
+                    statusEl.textContent = 'SQL 생성 실패';
+                    statusEl.className = 'status-text error';
+                    return;
+                }
+
+                finalizeSqlHistoryEntry(liveTextEl, fullResponse);
+            };
         }
 
-        function stopSqlThinkingIndicator(intervalId) {
-            clearInterval(intervalId);
-            const entry = document.getElementById('sql-thinking-entry');
-            if (entry) {
-                entry.remove();
-            }
+        // 채팅 화면과 동일한 입력창 자동 높이 조절.
+        function autoGrowSqlRequestInput(event) {
+            const el = event.target;
+            el.style.height = 'auto';
+            el.style.height = el.scrollHeight + 'px';
         }
 
-        // 채팅처럼 질의 하나마다 결과를 이력에 이어붙인다(기존 결과를 덮어쓰지 않음).
-        function appendSqlHistoryEntry(naturalLanguageRequest, sql) {
+        // 채팅처럼 질의 하나마다 이력에 새 항목을 만든다(기존 항목은 그대로 두고 이어붙임).
+        // liveTextEl은 스트리밍 중 토큰이 쌓이는 자리이자, 완료 후 SQL 코드블록으로 바뀌는 자리다.
+        function createSqlHistoryEntry(naturalLanguageRequest) {
             const historyEl = document.getElementById('sql-history');
             const placeholder = historyEl.querySelector('.placeholder');
             if (placeholder) {
@@ -662,6 +649,71 @@
             const questionEl = document.createElement('div');
             questionEl.className = 'sql-history-question';
             questionEl.textContent = naturalLanguageRequest;
+
+            const rawEl = document.createElement('div');
+            rawEl.className = 'sql-raw-response';
+
+            const liveTextEl = document.createElement('div');
+            liveTextEl.className = 'sql-raw-text-part';
+            rawEl.appendChild(liveTextEl);
+
+            entry.appendChild(questionEl);
+            entry.appendChild(rawEl);
+            historyEl.appendChild(entry);
+            historyEl.scrollTop = historyEl.scrollHeight;
+
+            return { entry, rawEl, liveTextEl };
+        }
+
+        // 응답 토큰이 오기 전까지 점 애니메이션 + 순환 문구를 liveTextEl 안에 보여준다.
+        function startSqlThinkingIndicator(liveTextEl) {
+            const phrases = ['테이블 스키마를 확인하고 있어요...', 'SQL을 작성하고 있어요...', '조금만 더 기다려주세요...'];
+
+            liveTextEl.innerHTML = '<div class="thinking-indicator">' +
+                '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
+                '<span class="thinking-text">' + phrases[0] + '</span></div>';
+
+            let index = 0;
+            return setInterval(() => {
+                index = (index + 1) % phrases.length;
+                const textEl = liveTextEl.querySelector('.thinking-text');
+                if (textEl) {
+                    textEl.textContent = phrases[index];
+                }
+            }, 2500);
+        }
+
+        // 스트림이 끝나면 원문에서 ```sql 코드블록만 찾아 그 부분을 SQL 복사 영역으로 바꾼다.
+        // (Java의 extractSql()과 동일한 로직 - 서버가 SSE로 토큰만 보내주기 때문에 여기서
+        // 클라이언트가 직접 코드블록 경계를 찾아야 한다.)
+        function finalizeSqlHistoryEntry(liveTextEl, fullResponse) {
+            const rawEl = liveTextEl.parentElement;
+            rawEl.innerHTML = '';
+
+            const fenceStart = fullResponse.indexOf('```');
+            const contentStart = fenceStart >= 0 ? fullResponse.indexOf('\n', fenceStart) : -1;
+            const fenceEnd = fenceStart >= 0 ? fullResponse.indexOf('```', fenceStart + 3) : -1;
+            const hasFence = fenceStart >= 0 && contentStart >= 0 && fenceEnd > contentStart;
+
+            if (!hasFence) {
+                // 코드블록을 못 찾으면(모델이 지시를 안 따른 경우) 원문 그대로만 보여준다.
+                const textPart = document.createElement('div');
+                textPart.className = 'sql-raw-text-part';
+                textPart.textContent = fullResponse;
+                rawEl.appendChild(textPart);
+                return;
+            }
+
+            const before = fullResponse.substring(0, fenceStart).trim();
+            const sql = fullResponse.substring(contentStart + 1, fenceEnd).trim();
+            const after = fullResponse.substring(fenceEnd + 3).replace(/^sql\b/i, '').trim();
+
+            if (before) {
+                const beforeEl = document.createElement('div');
+                beforeEl.className = 'sql-raw-text-part';
+                beforeEl.textContent = before;
+                rawEl.appendChild(beforeEl);
+            }
 
             const sqlWrapper = document.createElement('div');
             sqlWrapper.className = 'sql-result-wrapper';
@@ -678,16 +730,18 @@
 
             sqlWrapper.appendChild(sqlEl);
             sqlWrapper.appendChild(copyBtn);
+            rawEl.appendChild(sqlWrapper);
 
-            entry.appendChild(questionEl);
-            entry.appendChild(sqlWrapper);
-            historyEl.appendChild(entry);
-            historyEl.scrollTop = historyEl.scrollHeight;
+            if (after) {
+                const afterEl = document.createElement('div');
+                afterEl.className = 'sql-raw-text-part';
+                afterEl.textContent = after;
+                rawEl.appendChild(afterEl);
+            }
         }
 
         function copyText(text) {
             navigator.clipboard.writeText(text)
-                .then(() => alert('복사되었습니다.'))
                 .catch(err => alert('복사 실패: ' + err.message));
         }
     </script>

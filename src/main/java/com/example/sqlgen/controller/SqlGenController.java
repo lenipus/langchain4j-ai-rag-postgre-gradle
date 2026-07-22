@@ -1,17 +1,16 @@
 package com.example.sqlgen.controller;
 
-import com.example.sqlgen.dto.GenerateSqlRequest;
-import com.example.sqlgen.dto.GenerateSqlResponse;
 import com.example.sqlgen.dto.RegisterSqlGenConnectionRequest;
 import com.example.sqlgen.dto.SqlGenConnectionDto;
+import com.example.sqlgen.dto.SqlStreamTokenDto;
 import com.example.sqlgen.dto.TableSchemaDto;
 import com.example.sqlgen.dto.TestConnectionRequest;
 import com.example.sqlgen.service.SqlGenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -74,15 +73,18 @@ public class SqlGenController {
         }
     }
 
-    @PostMapping("/generate")
-    public ResponseEntity<?> generateSql(@RequestBody GenerateSqlRequest request) {
-        try {
-            String sql = sqlGenService.generateSql(
-                    request.connectionId(), request.tableNames(), request.naturalLanguageRequest());
-            return ResponseEntity.ok(new GenerateSqlResponse(sql));
-        } catch (RuntimeException e) {
-            log.warn("SQL 생성 실패: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
-        }
+    /**
+     * 채팅 화면과 동일한 SSE 스트리밍 방식. EventSource는 GET만 지원하므로 쿼리 파라미터로 받는다.
+     * 에러가 나면 스트림 자체가 에러로 종료되고, 화면에서는 EventSource의 onerror로 감지한다
+     * (이 프로젝트의 다른 스트리밍 엔드포인트(/ai/rag/stream)와 동일한 패턴).
+     */
+    @GetMapping(value = "/generate/stream", produces = "text/event-stream;charset=UTF-8")
+    public Flux<SqlStreamTokenDto> generateSqlStream(
+            @RequestParam Long connectionId,
+            @RequestParam List<String> tableNames,
+            @RequestParam String naturalLanguageRequest) {
+        log.info("SQL 생성 스트리밍 요청 수신 - 연결: {}, 테이블: {}", connectionId, tableNames);
+        return sqlGenService.generateSqlStream(connectionId, tableNames, naturalLanguageRequest)
+                .map(SqlStreamTokenDto::new);
     }
 }
