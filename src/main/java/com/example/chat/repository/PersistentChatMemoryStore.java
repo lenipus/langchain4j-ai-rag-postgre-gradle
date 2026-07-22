@@ -1,6 +1,7 @@
 package com.example.chat.repository;
 
 import com.example.chat.entity.ChatMemoryEntity;
+import com.example.chat.service.SqlGenChatbot;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -58,6 +59,9 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
      * 누적으로 컨텍스트 윈도우가 터지는 걸 막는다. 자세한 이유는 updateMessages() 참고.
      */
     private static final String RAG_INJECTION_MARKER = "\n\nAnswer using the following information:\n";
+
+    /** SQL 생성 모드가 스키마 컨텍스트를 붙일 때 쓰는 구분자. 역할은 위 RAG 마커와 동일. */
+    private static final String SQLGEN_CONTEXT_MARKER = SqlGenChatbot.SCHEMA_CONTEXT_MARKER;
 
     /**
      * 메시지 업데이트 (턴 키 없이 - 단순 채팅 등 RAG를 쓰지 않는 흐름용).
@@ -172,7 +176,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
 
         if (message instanceof UserMessage userMessage) {
             messageType = "USER";
-            content = isLatest ? userMessage.singleText() : stripRagInjection(userMessage.singleText());
+            content = isLatest ? userMessage.singleText() : stripInjectedContext(userMessage.singleText());
         } else if (message instanceof AiMessage aiMessage) {
             messageType = "ASSISTANT";
             content = aiMessage.text();
@@ -189,11 +193,20 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         return entity;
     }
 
-    private String stripRagInjection(String text) {
+    /** RAG 삽입 마커와 SQL 생성 스키마 컨텍스트 마커 중 먼저 나오는 위치에서 잘라낸다. */
+    private String stripInjectedContext(String text) {
         if (text == null) {
             return null;
         }
-        int index = text.indexOf(RAG_INJECTION_MARKER);
-        return index >= 0 ? text.substring(0, index) : text;
+        int ragIndex = text.indexOf(RAG_INJECTION_MARKER);
+        int sqlGenIndex = text.indexOf(SQLGEN_CONTEXT_MARKER);
+        int cutIndex = -1;
+        if (ragIndex >= 0) {
+            cutIndex = ragIndex;
+        }
+        if (sqlGenIndex >= 0 && (cutIndex < 0 || sqlGenIndex < cutIndex)) {
+            cutIndex = sqlGenIndex;
+        }
+        return cutIndex >= 0 ? text.substring(0, cutIndex) : text;
     }
 }

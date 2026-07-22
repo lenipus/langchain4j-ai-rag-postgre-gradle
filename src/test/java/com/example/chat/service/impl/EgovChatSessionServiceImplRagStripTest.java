@@ -3,6 +3,7 @@ package com.example.chat.service.impl;
 import com.example.chat.dto.ChatMessageDto;
 import com.example.chat.entity.ChatMemoryEntity;
 import com.example.chat.repository.ChatMemoryRepository;
+import com.example.chat.service.SqlGenChatbot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +32,7 @@ class EgovChatSessionServiceImplRagStripTest {
     @Test
     @DisplayName("USER 메시지의 RAG 삽입 텍스트는 화면 조회 시 잘려나간다")
     void stripsRagInjectionFromUserMessage() {
-        String augmented = "본부장 연봉 상한액이 얼마야??\n\nAnswer using the following information:\n부 칙 제1조...";
+        String augmented = "연봉 상한액이 얼마야??\n\nAnswer using the following information:\n부 칙 제1조...";
         ChatMemoryEntity entity = new ChatMemoryEntity("session-1", "USER", augmented);
         entity.setCreatedAt(LocalDateTime.now());
         when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(eq("session-1")))
@@ -54,6 +55,21 @@ class EgovChatSessionServiceImplRagStripTest {
         List<ChatMessageDto> result = service.getSessionMessages("session-2");
 
         assertThat(result.get(0).getContent()).isEqualTo("겸직허가 규정 좀 알려줘");
+    }
+
+    @Test
+    @DisplayName("USER 메시지의 SQL 생성 스키마 컨텍스트도 화면 조회 시 잘려나간다")
+    void stripsSqlGenContextFromUserMessage() {
+        String augmented = "users 조회 쿼리 만들어줘" + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + "[테이블: users]\n- id (bigint, PK, NOT NULL)";
+        ChatMemoryEntity entity = new ChatMemoryEntity("session-5", "USER", augmented);
+        entity.setCreatedAt(LocalDateTime.now());
+        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(eq("session-5")))
+                .thenReturn(List.of(entity));
+
+        List<ChatMessageDto> result = service.getSessionMessages("session-5");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getContent()).isEqualTo("users 조회 쿼리 만들어줘");
     }
 
     @Test

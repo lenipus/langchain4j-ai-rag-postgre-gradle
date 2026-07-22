@@ -71,7 +71,7 @@ langchain4j:
       api-key: ${OLLAMA_CHAT_API_KEY:}
       api-type: ${OLLAMA_CHAT_API_TYPE:ollama}        # API 규격: (ollama, openai)
       model-name: ${OLLAMA_CHAT_MODEL_NAME:}
-      temperature: 0.4
+      temperature: 0.2
       timeout: 60s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:0}
     embedding-model:

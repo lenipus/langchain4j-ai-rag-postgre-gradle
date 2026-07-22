@@ -1,6 +1,7 @@
 package com.example.chat.repository;
 
 import com.example.chat.entity.ChatMemoryEntity;
+import com.example.chat.service.SqlGenChatbot;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -91,6 +92,42 @@ class PersistentChatMemoryStoreTest {
         List<ChatMemoryEntity> secondSaved = secondCaptor.getAllValues().subList(1, 3);
         assertThat(secondSaved.get(0).getContent()).isEqualTo("휴가 결재선이 어떻게 돼??");
         assertThat(secondSaved.get(1).getContent()).isEqualTo("결재선은 팀장-부서장-본부장 순입니다.");
+    }
+
+    @Test
+    @DisplayName("마지막 메시지(현재 턴)의 SQL 생성 스키마 컨텍스트는 그대로 저장된다")
+    void keepsSqlGenContextOnLatestMessage() {
+        ChatMessage latestUserMessage = UserMessage.from(
+                "users 테이블에 email 컬럼도 추가해줘" + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + "[테이블: users]\n- id (bigint, PK, NOT NULL)");
+        List<ChatMessage> messages = List.of(latestUserMessage);
+
+        store.updateMessages("session-6", messages);
+
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository).save(captor.capture());
+        assertThat(captor.getValue().getContent()).contains("[테이블: users]");
+    }
+
+    @Test
+    @DisplayName("과거 턴(마지막이 아닌) 사용자 메시지의 SQL 생성 스키마 컨텍스트는 잘려나간다")
+    void stripsSqlGenContextFromPastTurns() {
+        ChatMessage pastUserMessage = UserMessage.from(
+                "users 조회 쿼리 만들어줘" + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + "[테이블: users]\n- id (bigint, PK, NOT NULL)");
+        ChatMessage pastAiMessage = AiMessage.from("```sql\nSELECT * FROM users;\n```");
+        ChatMessage latestUserMessage = UserMessage.from(
+                "email 컬럼도 추가해줘" + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + "[테이블: users]\n- id (bigint, PK, NOT NULL)");
+        List<ChatMessage> messages = List.of(pastUserMessage, pastAiMessage, latestUserMessage);
+
+        store.updateMessages("session-7", messages);
+
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository, times(3)).save(captor.capture());
+        List<ChatMemoryEntity> saved = captor.getAllValues();
+
+        assertThat(saved.get(0).getContent()).isEqualTo("users 조회 쿼리 만들어줘");
+        assertThat(saved.get(1).getContent()).isEqualTo("```sql\nSELECT * FROM users;\n```");
+        assertThat(saved.get(2).getContent())
+                .isEqualTo("email 컬럼도 추가해줘" + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + "[테이블: users]\n- id (bigint, PK, NOT NULL)");
     }
 
     @Test

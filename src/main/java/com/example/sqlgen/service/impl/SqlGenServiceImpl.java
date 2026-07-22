@@ -9,16 +9,9 @@ import com.example.sqlgen.entity.SqlGenConnectionEntity;
 import com.example.sqlgen.repository.SqlGenConnectionRepository;
 import com.example.sqlgen.service.SqlGenService;
 import com.example.sqlgen.util.SqlGenPasswordEncryptor;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -40,7 +33,6 @@ public class SqlGenServiceImpl implements SqlGenService {
     private static final Set<String> EXCLUDED_SCHEMAS = Set.of("pg_catalog", "information_schema");
 
     private final SqlGenConnectionRepository connectionRepository;
-    private final StreamingChatModel sqlGenStreamingChatModel;
     private final SqlGenPasswordEncryptor passwordEncryptor;
 
     @Override
@@ -122,49 +114,20 @@ public class SqlGenServiceImpl implements SqlGenService {
     }
 
     @Override
-    public Flux<String> generateSqlStream(Long connectionId, List<String> tableNames, String naturalLanguageRequest) {
-        // 스키마 조회 같은 블로킹 작업도 구독 시점에 실행되도록 defer로 감싼다 - 그래야
-        // 여기서 던지는 예외(연결 없음, DB 접속 실패 등)도 동기적으로 튀지 않고 스트림의
-        // 에러 시그널로 정상 전달된다.
-        return Flux.defer(() -> {
-            SqlGenConnectionEntity connectionInfo = getConnectionOrThrow(connectionId);
+    public String buildSchemaContext(Long connectionId, List<String> tableNames) {
+        SqlGenConnectionEntity connectionInfo = getConnectionOrThrow(connectionId);
 
-            String dbProductName;
-            List<TableSchemaDto> schemas;
-            try (Connection conn = openConnectionFor(connectionInfo)) {
-                dbProductName = conn.getMetaData().getDatabaseProductName();
-                schemas = fetchSchemas(conn, tableNames);
-            } catch (SQLException e) {
-                throw new IllegalStateException("테이블 스키마 조회에 실패했습니다: " + e.getMessage(), e);
-            }
+        String dbProductName;
+        List<TableSchemaDto> schemas;
+        try (Connection conn = openConnectionFor(connectionInfo)) {
+            dbProductName = conn.getMetaData().getDatabaseProductName();
+            schemas = fetchSchemas(conn, tableNames);
+        } catch (SQLException e) {
+            throw new IllegalStateException("테이블 스키마 조회에 실패했습니다: " + e.getMessage(), e);
+        }
 
-            String prompt = buildPrompt(schemas, naturalLanguageRequest, dbProductName);
-            log.info("SQL 생성(스트리밍) 요청 - DBMS: {}, 테이블: {}, 요청: {}", dbProductName, tableNames, naturalLanguageRequest);
-
-            ChatRequest chatRequest = ChatRequest.builder()
-                    .messages(SystemMessage.from(SqlGenService.SQL_GEN_SYSTEM_PROMPT), UserMessage.from(prompt))
-                    .build();
-
-            StringBuilder fullResponse = new StringBuilder();
-            return Flux.<String>create(sink -> sqlGenStreamingChatModel.chat(chatRequest, new StreamingChatResponseHandler() {
-                @Override
-                public void onPartialResponse(String partialResponse) {
-                    fullResponse.append(partialResponse);
-                    sink.next(partialResponse);
-                }
-
-                @Override
-                public void onCompleteResponse(ChatResponse completeResponse) {
-                    log.info("SQL 생성(스트리밍) 결과: {}", extractSql(fullResponse.toString()));
-                    sink.complete();
-                }
-
-                @Override
-                public void onError(Throwable error) {
-                    sink.error(error);
-                }
-            }));
-        });
+        log.info("SQL 생성 스키마 컨텍스트 조회 - DBMS: {}, 테이블: {}", dbProductName, tableNames);
+        return formatSchemaBlock(schemas, dbProductName);
     }
 
     private List<TableSchemaDto> fetchSchemas(Connection conn, List<String> tableNames) throws SQLException {
@@ -223,9 +186,9 @@ public class SqlGenServiceImpl implements SqlGenService {
     }
 
     /**
-     * 매 요청마다 달라지는 부분(대상 DBMS, 테이블 스키마, 사용자 요청)만 User 메시지로 만든다.
-     * 항상 같은 절차적 지시사항은 {@link SqlGenService#SQL_GEN_SYSTEM_PROMPT}(System 메시지)에
-     * 이미 들어있으므로 여기서 반복하지 않는다.
+     * 대상 DBMS + 테이블 스키마를 텍스트로 만든다. 항상 같은 절차적 지시사항은
+     * {@link SqlGenService#SQL_GEN_SYSTEM_PROMPT}(System 메시지)에 이미 들어있으므로 여기서
+     * 반복하지 않는다.
      *
      * <p>대상 DBMS 이름을 명시적으로 알려준다 - 안 알려주면 모델이 어떤 DBMS인지 몰라서
      * 엉뚱한 방언(예: MariaDB 연결인데 MSSQL 문법)으로 SQL을 만들어버리는 문제가 있었다.
@@ -236,7 +199,7 @@ public class SqlGenServiceImpl implements SqlGenService {
      * 사용자라 한글로 되돌림 (자세한 이유는 {@link SqlGenService#SQL_GEN_SYSTEM_PROMPT}
      * 참고).</p>
      */
-    String buildPrompt(List<TableSchemaDto> schemas, String naturalLanguageRequest, String dbmsName) {
+    String formatSchemaBlock(List<TableSchemaDto> schemas, String dbmsName) {
         StringBuilder sb = new StringBuilder();
         sb.append("대상 DBMS는 ").append(dbmsName).append("입니다. 반드시 이 DBMS의 SQL 문법과 함수만 사용하세요")
                 .append(" (다른 DBMS의 문법이나 함수를 섞어 쓰지 마세요).\n\n");
@@ -253,35 +216,7 @@ public class SqlGenServiceImpl implements SqlGenService {
             sb.append("\n");
         }
 
-        sb.append("사용자 요청: ").append(naturalLanguageRequest);
-        return sb.toString();
-    }
-
-    /**
-     * LLM 응답에서 SQL만 추출한다. 코드블록(```sql ... ``` 또는 ``` ... ```)으로 감쌌으면
-     * 그 안쪽만, "SQL:" 같은 표시가 있으면 그 뒤부터 취한다. 둘 다 없으면 트림한 원문 그대로.
-     */
-    String extractSql(String rawResponse) {
-        if (rawResponse == null) {
-            return "";
-        }
-        String text = rawResponse.trim();
-
-        int fenceStart = text.indexOf("```");
-        if (fenceStart >= 0) {
-            int contentStart = text.indexOf('\n', fenceStart);
-            int fenceEnd = text.indexOf("```", fenceStart + 3);
-            if (contentStart >= 0 && fenceEnd > contentStart) {
-                return text.substring(contentStart + 1, fenceEnd).trim();
-            }
-        }
-
-        int sqlMarkerIndex = text.lastIndexOf("SQL:");
-        if (sqlMarkerIndex >= 0) {
-            return text.substring(sqlMarkerIndex + "SQL:".length()).trim();
-        }
-
-        return text;
+        return sb.toString().stripTrailing();
     }
 
     private SqlGenConnectionDto toDto(SqlGenConnectionEntity entity) {

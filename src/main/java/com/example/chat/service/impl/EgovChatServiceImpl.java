@@ -5,12 +5,15 @@ import com.example.chat.service.EgovChatService;
 import com.example.chat.service.ChatbotFactory;
 import com.example.chat.service.RagChatbot;
 import com.example.chat.service.SimpleChatbot;
+import com.example.chat.service.SqlGenChatbot;
+import com.example.sqlgen.service.SqlGenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements EgovChatService {
 
     private final ChatbotFactory chatbotFactory;
+    private final SqlGenService sqlGenService;
 
     /**
      * 세션별 RAG 기반 스트리밍 응답 생성
@@ -57,7 +61,8 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                     })
                     .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
                             sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
-                    .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e));
+                    .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
+                    .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
 
         } catch (Exception e) {
             log.error("RAG 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
@@ -93,10 +98,54 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                     })
                     .doOnComplete(() -> log.info("Simple 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
                             sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
-                    .doOnError(e -> log.error("Simple 스트리밍 오류 - 세션: {}", sessionId, e));
+                    .doOnError(e -> log.error("Simple 스트리밍 오류 - 세션: {}", sessionId, e))
+                    .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
 
         } catch (Exception e) {
             log.error("Simple 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
+            return Flux.error(e);
+        }
+    }
+
+    /**
+     * 세션별 SQL 생성 스트리밍 응답 생성
+     * - 사용자가 선택한 테이블의 스키마 텍스트를 사용자 메시지 뒤에 붙여(RAG의 문서 주입과
+     *   같은 패턴) SqlGenChatbot에 전달한다.
+     * - ChatMemory를 세션과 공유하므로, 이전 턴에서 생성한 SQL을 이어서 수정하는 후속
+     *   요청("방금 쿼리에 email 컬럼도 추가해줘")도 이전 대화를 참고해 처리된다.
+     */
+    @Override
+    public Flux<String> streamSqlGenResponse(String query, String model, Long connectionId, List<String> tableNames) {
+        String sessionId = SessionContext.getCurrentSessionId();
+        long startTime = System.currentTimeMillis();
+        log.info("SQL 생성 스트리밍 질의 시작 - 세션: {}, 모델: {}, 연결: {}, 테이블: {}, 쿼리: {}",
+                sessionId, model, connectionId, tableNames, query);
+
+        try {
+            validateSessionId(sessionId);
+
+            AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
+            AtomicLong answerLength = new AtomicLong(0);
+
+            String schemaContext = sqlGenService.buildSchemaContext(connectionId, tableNames);
+            String augmentedQuery = query + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + schemaContext;
+
+            SqlGenChatbot sqlGenChatbot = chatbotFactory.createSqlGenChatbot(model, sessionId);
+            return sqlGenChatbot.streamChat(augmentedQuery)
+                    .doOnNext(chunk -> {
+                        answerLength.addAndGet(chunk.length());
+                        if (firstChunkReceived.compareAndSet(false, true)) {
+                            log.info("SQL 생성 답변 수신 시작 - 세션: {}, 소요: {}ms",
+                                    sessionId, System.currentTimeMillis() - startTime);
+                        }
+                    })
+                    .doOnComplete(() -> log.info("SQL 생성 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                            sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
+                    .doOnError(e -> log.error("SQL 생성 스트리밍 오류 - 세션: {}", sessionId, e))
+                    .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+
+        } catch (Exception e) {
+            log.error("SQL 생성 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
             return Flux.error(e);
         }
     }
@@ -159,5 +208,23 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         }
 
         return "죄송합니다. 응답을 생성하는 중에 오류가 발생했습니다: " + errorMessage;
+    }
+
+    private Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
+        return stream
+                .retryWhen(reactor.util.retry.Retry.backoff(3, java.time.Duration.ofSeconds(1))
+                        .filter(throwable -> {
+                            String msg = throwable.getMessage();
+                            boolean is503Error = msg != null && (msg.contains("503") || msg.contains("Service Temporarily Unavailable"));
+                            if (is503Error) {
+                                log.warn("[{}] LLM 서버 503 감지 - 재시도 중... (세션: {})", serviceType, sessionId);
+                            }
+                            return is503Error;
+                        })
+                )
+                .onErrorResume(e -> {
+                    log.error("[{}] 스트리밍 최종 실패 - 세션: {}", serviceType, sessionId, e);
+                    return Flux.just("\n[오류: 서비스 응답이 지연되거나 일시적으로 이용 불가능합니다. 잠시 후 다시 시도해주세요.]");
+                });
     }
 }

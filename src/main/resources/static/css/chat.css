@@ -57,7 +57,7 @@ body {
     overflow-x: hidden;
 }
 .container {
-    flex: 1;
+    flex: none;
     display: flex;
     flex-direction: column;
     max-width: none;
@@ -73,7 +73,6 @@ h1 {
 }
 .tabs {
     display: flex;
-    margin-bottom: 20px;
     border-bottom: 1px solid #ddd;
 }
 .tab {
@@ -92,7 +91,8 @@ h1 {
     font-weight: bold;
 }
 .chat-container {
-    height: 720px;
+    flex: 1;
+    min-height: 400px;
     overflow-y: auto;
     overflow-x: hidden;
     border: 1px solid #ddd;
@@ -102,8 +102,8 @@ h1 {
     background-color: #f9f9f9;
 }
 .message {
-    margin-bottom: 10px;
-    padding: 8px 12px;
+    margin-bottom: 8px;
+    padding: 6px 12px;
     border-radius: 5px;
     max-width: 80%;
     word-wrap: break-word;
@@ -121,18 +121,99 @@ h1 {
 }
 .ai-message p {
     white-space: pre-wrap;
-    margin: 0.5em 0;
+    margin: 0.25em 0;
+}
+.ai-message ul, .ai-message ol {
+    margin: 0.2em 0;
+    padding-left: 1.4em;
+}
+.ai-message li {
+    white-space: pre-wrap;
+    margin: 0.05em 0;
+}
+/* marked.js는 항목 사이에 빈 줄이 있는 목록("loose list")을 만나면 각 <li> 안쪽 텍스트를
+   <p>로 한 번 더 감싼다 - 그러면 위 .ai-message p 의 단락 여백이 li 안에서도 그대로 적용돼
+   항목 사이 간격이 눈에 띄게 벌어진다(LLM이 항목마다 빈 줄을 넣어 답변하는 경우 특히 흔함).
+   목록 안에서는 그 안쪽 p의 여백을 없애 li 자체의 여백만 남긴다. */
+.ai-message li p {
+    margin: 0;
+}
+.ai-message h1, .ai-message h2, .ai-message h3,
+.ai-message h4, .ai-message h5, .ai-message h6 {
+    margin: 0.3em 0 0.15em;
+    font-size: 1.05em;
+    line-height: 1.25;
+}
+.ai-message blockquote {
+    margin: 0.25em 0;
+    padding-left: 0.8em;
+}
+.ai-message hr {
+    margin: 0.4em 0;
+    border: none;
+    border-top: 1px solid #ddd;
+}
+.ai-message > *:first-child {
+    margin-top: 0;
+}
+.ai-message > *:last-child {
+    margin-bottom: 0;
 }
 .ai-message * {
     white-space: normal;
 }
 .ai-message pre {
+    position: relative;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    background-color: #263238;
+    color: #eceff1;
+    padding: 16px;
+    padding-top: 30px;
+    border-radius: 5px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    margin: 8px 0;
+}
+.ai-message pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
     white-space: pre-wrap;
     overflow-wrap: break-word;
 }
 .ai-message code {
     white-space: pre-wrap;
     overflow-wrap: break-word;
+}
+.code-copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    background-color: #607d8b;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.code-copy-btn:hover {
+    background-color: #546e7a;
+}
+.retry-btn {
+    display: block;
+    margin-top: 8px;
+    padding: 6px 14px;
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.retry-btn:hover {
+    background-color: #c0392b;
 }
 .input-container {
     display: flex;
@@ -281,27 +362,25 @@ h1 {
     color: #666;
 }
 .model-selection {
-    margin: 15px 0;
-    padding: 15px;
-    background-color: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 5px;
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
 }
 .model-selection label {
     font-weight: bold;
     color: #495057;
     margin: 0;
+    font-size: 13px;
+    white-space: nowrap;
 }
 .model-select {
-    padding: 8px 12px;
+    padding: 4px 8px;
     border: 1px solid #ced4da;
     border-radius: 4px;
     background-color: white;
-    font-size: 14px;
-    min-width: 200px;
+    font-size: 13px;
+    max-width: 220px;
 }
 .model-select:focus {
     outline: none;
@@ -311,6 +390,10 @@ h1 {
 .model-status {
     font-size: 12px;
     color: #6c757d;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .model-status.success {
     color: #28a745;
@@ -404,11 +487,22 @@ h1 {
     border-color: #c0392b;
     color: white;
 }
+.title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #ecf0f1;
+    padding-bottom: 8px;
+}
 .current-session-title {
     font-size: 18px;
     font-weight: bold;
-    margin-bottom: 20px;
     color: #2c3e50;
-    border-bottom: 1px solid #ecf0f1;
-    padding-bottom: 10px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

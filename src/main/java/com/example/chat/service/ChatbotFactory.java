@@ -190,6 +190,31 @@ public class ChatbotFactory {
     }
 
     /**
+     * SQL 생성 챗봇 인스턴스 생성
+     * - RAG처럼 벡터 검색을 하는 게 아니라, 호출부(EgovChatServiceImpl)가 사용자가 선택한
+     *   테이블의 스키마 텍스트를 이미 사용자 메시지에 붙여서 넘겨주므로 ContentRetriever는
+     *   필요 없다. Simple 챗봇과 동일하게 세션별 ChatMemory만 있으면 된다 - turnId 기반
+     *   감사 로그(rag_retrieval_logs 같은)는 SQL 생성엔 없어서 turnId 없는 오버로드를 쓴다.
+     *
+     * @param modelName 사용할 모델명 (null이면 기본 모델)
+     * @param sessionId 세션 ID (메모리 관리용)
+     * @return SqlGenChatbot 인스턴스
+     */
+    public SqlGenChatbot createSqlGenChatbot(String modelName, String sessionId) {
+        StreamingChatModel streamingModel = isDefaultModel(modelName)
+                ? defaultStreamingModel
+                : createStreamingModel(modelName);
+
+        log.info("SQL 생성 챗봇 생성 - 모델: {}, 세션: {}",
+                isDefaultModel(modelName) ? defaultModelName : modelName, sessionId);
+
+        return AiServices.builder(SqlGenChatbot.class)
+                .streamingChatModel(streamingModel)
+                .chatMemory(createChatMemory(sessionId))
+                .build();
+    }
+
+    /**
      * MessageWindowChatMemory 생성 (턴 키 없이 - 단순 채팅용)
      * - 최근 N개 메시지만 유지
      * - PersistentChatMemoryStore를 통해 PostgreSQL에 자동 저장

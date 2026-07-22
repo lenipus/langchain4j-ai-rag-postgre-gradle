@@ -9,9 +9,11 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -67,5 +69,21 @@ class EgovChatControllerSessionCleanupTest {
         assertThat(SessionContext.getCurrentSessionId())
                 .isEqualTo(SessionContext.DEFAULT_CONVERSATION_ID);
         verify(sessionService).sessionExists("s-2");
+    }
+
+    @Test
+    @DisplayName("유효 세션으로 SQL 생성 스트림 요청 후 요청 스레드의 세션 컨텍스트가 정리된다")
+    void clearsSessionContextOnRequestThreadAfterSqlGenStream() {
+        when(sessionService.sessionExists("s-3")).thenReturn(true);
+        when(sessionService.getSessionMessages("s-3")).thenReturn(Collections.emptyList());
+        when(sessionService.generateSessionTitle(anyString())).thenReturn("title");
+        when(chatService.streamSqlGenResponse(anyString(), any(), anyLong(), any()))
+                .thenReturn(Flux.<String>empty());
+
+        controller.streamSqlGenResponse("hello", null, "s-3", 1L, List.of("users"));
+
+        assertThat(SessionContext.getCurrentSessionId())
+                .isEqualTo(SessionContext.DEFAULT_CONVERSATION_ID);
+        verify(sessionService).sessionExists("s-3");
     }
 }
