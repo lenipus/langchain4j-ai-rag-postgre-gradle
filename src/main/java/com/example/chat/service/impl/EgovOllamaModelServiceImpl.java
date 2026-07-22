@@ -49,14 +49,40 @@ public class EgovOllamaModelServiceImpl extends EgovAbstractServiceImpl implemen
         return "openai".equalsIgnoreCase(chatModelApiType);
     }
 
+    /** ollama list 등이 데몬 응답 지연 등으로 빈 목록을 반환했을 때 재시도 전 대기 시간 */
+    private static final long EMPTY_RESULT_RETRY_DELAY_MS = 300;
+
     /**
      * 설치된 Ollama 모델 목록 조회 (임베딩 전용 모델 제외)
+     *
+     * <p>{@code ollama --version}(가용성 체크)은 데몬 없이도 성공하지만 {@code ollama list}는
+     * 백그라운드 데몬이 응답해야 하므로, 데몬이 막 기동된 직후처럼 데몬 응답이 늦는 시점에는
+     * 가용은 true이면서 목록만 비어 오는 경우가 있다. 빈 목록이면 한 번만 짧게 재시도한다.</p>
      *
      * @return 모델명 리스트
      */
     @Override
     public List<String> getInstalledModels() {
+        List<String> models = fetchInstalledModels();
+        if (models.isEmpty()) {
+            log.warn("모델 목록이 비어있어 {}ms 후 재시도합니다.", EMPTY_RESULT_RETRY_DELAY_MS);
+            sleepQuietly(EMPTY_RESULT_RETRY_DELAY_MS);
+            models = fetchInstalledModels();
+        }
+        return models;
+    }
+
+    // 테스트에서 실제 프로세스/HTTP 호출 없이 재시도 동작만 검증할 수 있도록 protected로 연다.
+    protected List<String> fetchInstalledModels() {
         return isRemoteMode() ? getRemoteModels() : getLocalModels();
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
