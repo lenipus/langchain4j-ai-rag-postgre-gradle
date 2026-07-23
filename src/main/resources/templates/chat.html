@@ -179,18 +179,26 @@
             <div class="tab" id="sqlgen-tab" th:if="${sqlgenEnabled}" onclick="switchTab('sqlgen')">SQL 생성</div>
         </div>
 
-        <div class="chat-container" id="chat-container">
-            <!-- 초기 안내 메시지 -->
-            <div class="message ai-message">
-                <strong>LangChain4j RAG 채팅에 오신 것을 환영합니다!</strong><br>
-                <strong>문서가 없는 경우:</strong><br>
-                • "문서 업로드" 버튼을 클릭하여 마크다운(.md) 파일을 업로드하세요<br>
-                • 또는 "문서 재인덱싱" 버튼을 클릭하여 기존 문서를 다시 로드하세요<br>
-                <strong>채팅 모드:</strong><br>
-                • <strong>RAG 채팅:</strong> 업로드된 문서를 기반으로 한 질의응답<br>
-                • <strong>일반 채팅:</strong> 일반적인 대화 (문서 없이도 가능)<br>
-                • <strong>SQL 생성:</strong> DB 연결/테이블을 선택해 자연어로 SQL 쿼리 생성
+        <div class="chat-container-wrapper">
+            <div class="chat-container" id="chat-container">
+                <!-- 초기 안내 메시지 -->
+                <div class="message ai-message">
+                    <strong>LangChain4j RAG 채팅에 오신 것을 환영합니다!</strong><br>
+                    <strong>문서가 없는 경우:</strong><br>
+                    • "문서 업로드" 버튼을 클릭하여 마크다운(.md) 파일을 업로드하세요<br>
+                    • 또는 "문서 재인덱싱" 버튼을 클릭하여 기존 문서를 다시 로드하세요<br>
+                    <strong>채팅 모드:</strong><br>
+                    • <strong>RAG 채팅:</strong> 업로드된 문서를 기반으로 한 질의응답<br>
+                    • <strong>일반 채팅:</strong> 일반적인 대화 (문서 없이도 가능)<br>
+                    • <strong>SQL 생성:</strong> DB 연결/테이블을 선택해 자연어로 SQL 쿼리 생성
+                </div>
             </div>
+            <!-- 답변 스트리밍 중에 사용자가 위로 스크롤해 다른 내용을 보고 있을 때만 나타난다.
+                 클릭하면 지금 작성 중인 답변 위치로 내려간다. -->
+            <button type="button" id="jump-to-latest-btn" class="jump-to-latest-btn"
+                    style="display:none;" onclick="scrollChatToBottom()">
+                <span class="jump-arrow">⬇</span> <span class="jump-label">답변 작성 중 - 보러 가기</span>
+            </button>
         </div>
 
         <div class="input-container">
@@ -671,6 +679,53 @@
             el.style.height = el.scrollHeight + 'px';
         }
 
+        // 답변 스트리밍 중 사용자가 위로 스크롤해 다른 내용을 보고 있을 때 떠 있는 안내
+        // 버튼. streamAiResponse()의 시작/토큰 수신/종료 지점에서 보이거나 숨겨진다.
+        // 아직 첫 토큰이 안 온 "대기" 단계와 실제로 토큰이 찍히는 "작성 중" 단계는 성격이
+        // 달라서(대기 단계는 경과 시간이 궁금하고, 작성 단계는 그냥 최신 위치로 가고 싶은
+        // 것) 문구를 다르게 보여준다 - 단계 구분은 activeStreamController.thinking으로 한다.
+        function setJumpButtonLabel(text) {
+            const label = document.querySelector('#jump-to-latest-btn .jump-label');
+            if (label) label.textContent = text;
+        }
+
+        function showJumpToLatestButton() {
+            const btn = document.getElementById('jump-to-latest-btn');
+            if (!btn) return;
+            if (!activeStreamController || !activeStreamController.thinking) {
+                setJumpButtonLabel('답변 작성 중 - 보러 가기');
+            }
+            // "대기" 단계 문구(경과 시간 포함)는 startThinkingIndicator()의 1초 인터벌이
+            // 계속 갱신해준다 - 여기선 손대지 않아도 다음 tick에 바로 맞는 문구로 보인다.
+            btn.style.display = 'flex';
+        }
+
+        function hideJumpToLatestButton() {
+            const btn = document.getElementById('jump-to-latest-btn');
+            if (btn) btn.style.display = 'none';
+        }
+
+        function scrollChatToBottom() {
+            const chatContainer = document.getElementById('chat-container');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            hideJumpToLatestButton();
+        }
+
+        // 버튼을 누르지 않고 사용자가 직접 맨 아래로 다시 스크롤해도 버튼을 치운다.
+        document.getElementById('chat-container').addEventListener('scroll', function () {
+            if (!activeStreamController) {
+                return;
+            }
+            const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 30;
+            if (atBottom) {
+                hideJumpToLatestButton();
+            } else {
+                // "생각 중" 표시(첫 토큰이 오기 전) 단계에서 스크롤을 올려도 뜨게 한다 -
+                // 이 단계는 토큰이 아직 없어 onmessage의 표시 로직이 실행되지 않는다.
+                showJumpToLatestButton();
+            }
+        });
+
         function addMessage(text, isUser) {
             const chatContainer = document.getElementById('chat-container');
             const messageDiv = document.createElement('div');
@@ -788,12 +843,21 @@
                 '<span class="thinking-text">' + phrases[0] + '</span>' +
                 '<span class="thinking-elapsed">(0s)</span></div>';
 
+            // 대기 단계에서 스크롤을 올려 "답변 작성 중 - 보러 가기" 버튼이 뜨면, 그동안은
+            // 아직 아무 토큰도 안 왔으니 같은 문구 대신 경과 시간을 보여준다 - 실제로 답변이
+            // 찍히기 시작하면(activeStreamController.thinking = false) 문구가 바뀐다.
+            setJumpButtonLabel('답변을 기다리는 중 (0s) - 보러 가기');
+
             let index = 0;
             // 문구 순환(4초 간격)과 경과 시간 표시(1초 간격)를 인터벌 하나로 같이 처리한다
             // (별도 인터벌 두 개를 두면 정리할 때 둘 다 clearInterval 해줘야 해서 번거롭다).
             return setInterval(() => {
                 const elapsedMs = Date.now() - startTime;
                 const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+                if (activeStreamController && activeStreamController.thinking) {
+                    setJumpButtonLabel('답변을 기다리는 중 (' + formatElapsedTime(elapsedMs) + ') - 보러 가기');
+                }
 
                 if (elapsedSeconds > 0 && elapsedSeconds % 4 === 0) {
                     index = (index + 1) % phrases.length;
@@ -902,6 +966,7 @@
             let thinkingIntervalId = startThinkingIndicator(aiMessageDiv, requestParams.mode);
             const chatContainerEl = document.getElementById('chat-container');
             chatContainerEl.scrollTop = chatContainerEl.scrollHeight;
+            hideJumpToLatestButton();
 
             // 스트리밍 API 엔드포인트 결정
             const endpoint = requestParams.mode === 'rag' ? '/ai/rag/stream'
@@ -939,12 +1004,15 @@
                 sendBtn.classList.remove('stop-mode');
                 sendBtn.removeAttribute('title');
                 sendBtn.disabled = false;
+                hideJumpToLatestButton();
             }
 
             // 전송 버튼이 "중지"로 바뀐 동안 눌리면 이걸 호출한다 - 진행 중인 응답을 중간에
             // 끊는다. 지금까지 받은 부분 응답은 그대로 남겨두고(재생성하지 않음), 정상 완료와
             // 동일하게 코드블록 버튼을 붙이고 세션 목록을 새로고침한다.
             activeStreamController = {
+                // 첫 토큰이 오기 전(대기 단계)인지 여부 - 점프 버튼 문구를 다르게 보여주는 데 쓴다.
+                thinking: true,
                 stop: function () {
                     if (thinkingIntervalId) {
                         clearInterval(thinkingIntervalId);
@@ -971,6 +1039,11 @@
                 if (thinkingIntervalId) {
                     clearInterval(thinkingIntervalId);
                     thinkingIntervalId = null;
+                    if (activeStreamController) {
+                        activeStreamController.thinking = false;
+                        // 점프 버튼이 대기 단계 문구(경과 시간 포함)로 떠 있었다면 즉시 갱신한다.
+                        setJumpButtonLabel('답변 작성 중 - 보러 가기');
+                    }
                 }
 
                 // 내용을 갱신하기 전에 "이미 맨 아래까지 내려와 있었는지"를 먼저 확인해둔다.
@@ -1026,9 +1099,12 @@
                 }
 
                 // 맨 아래에 있었을 때만 새 내용을 따라 계속 맨 아래로 내린다. 위로 스크롤해
-                // 다른 내용을 보고 있었다면(= wasAtBottom이 false) 그 위치를 그대로 둔다.
+                // 다른 내용을 보고 있었다면(= wasAtBottom이 false) 그 위치는 그대로 두고,
+                // 대신 "답변 작성 중 - 보러 가기" 버튼을 띄워 원하면 바로 이동할 수 있게 한다.
                 if (wasAtBottom) {
                     chatContainerEl2.scrollTop = chatContainerEl2.scrollHeight;
+                } else {
+                    showJumpToLatestButton();
                 }
             };
 
@@ -1354,12 +1430,15 @@
         // model-status는 제목 줄 오른쪽 좁은 공간에 들어가면서 말줄임(ellipsis) 처리되므로,
         // 잘린 전체 문구를 title(마우스 오버 툴팁)로도 항상 볼 수 있게 텍스트가 바뀔 때마다 동기화한다.
         // 텍스트를 바꾸는 곳이 여러 군데라 각 지점을 일일이 고치는 대신 한 곳에서 감시한다.
-        new MutationObserver(() => {
-            const modelStatus = document.getElementById('model-status');
-            if (modelStatus) {
-                modelStatus.title = modelStatus.textContent;
-            }
-        }).observe(document.getElementById('model-status'), { childList: true, characterData: true, subtree: true });
+        // #model-status가 화면에 없는 상태(주석 처리 등)에서 observe(null, ...)을 호출하면
+        // 여기서 예외가 터져 스크립트 최상단 실행이 멈춰버린다 - 그러면 바로 아래
+        // DOMContentLoaded 등록조차 안 돼 초기화(시작 오버레이 해제 포함)가 전혀 안 된다.
+        const modelStatusEl = document.getElementById('model-status');
+        if (modelStatusEl) {
+            new MutationObserver(() => {
+                modelStatusEl.title = modelStatusEl.textContent;
+            }).observe(modelStatusEl, { childList: true, characterData: true, subtree: true });
+        }
 
         document.addEventListener('DOMContentLoaded', function() {
             waitForServerStartup(function() {

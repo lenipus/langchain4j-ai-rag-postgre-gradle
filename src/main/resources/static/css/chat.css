@@ -90,6 +90,13 @@ h1 {
     margin-bottom: -1px;
     font-weight: bold;
 }
+.chat-container-wrapper {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
 .chat-container {
     flex: 1;
     min-height: 400px;
@@ -100,6 +107,55 @@ h1 {
     padding: 10px;
     margin-bottom: 15px;
     background-color: #f9f9f9;
+}
+/* 답변 스트리밍 중 사용자가 위로 스크롤해 다른 내용을 보고 있을 때만 떠 있는 안내
+   레이어. chat-container 밖(wrapper)에 둬서 메시지 목록을 스크롤해도 같이 스크롤되지
+   않고 화면 위에 계속 떠 있는다. */
+.jump-to-latest-btn {
+    position: absolute;
+    bottom: 27px;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background-color: rgba(35, 40, 48, 0.88);
+    color: white;
+    border: none;
+    border-radius: 999px;
+    padding: 9px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    z-index: 10;
+    transform: translate(-50%, 0);
+    animation: jump-btn-in 0.25s ease-out;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.jump-to-latest-btn:hover {
+    background-color: rgba(20, 24, 30, 0.92);
+    transform: translate(-50%, -2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
+}
+.jump-to-latest-btn .jump-arrow {
+    display: inline-block;
+    animation: jump-arrow-bounce 1s ease-in-out infinite;
+}
+@keyframes jump-btn-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, 12px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+@keyframes jump-arrow-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(3px); }
 }
 .message {
     margin-bottom: 20px;
