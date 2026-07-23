@@ -1,0 +1,58 @@
+# "remote" 프로파일 - 원격 GPU 서버의 Ollama(또는 OpenAI 호환 게이트웨이)를 쓸 때 설정.
+# 활성화 방법: SPRING_PROFILES_ACTIVE=remote (IntelliJ 실행 설정의 환경변수로 추가)
+#
+# 아래는 예시 값이다 - <> 로 표시된 부분을 실제 원격 서버 정보로 채워 넣으면 된다.
+# 새 서버 구성을 추가하고 싶으면 이 파일을 복사해서 application-{이름}.yml로 만들고
+# SPRING_PROFILES_ACTIVE를 그 이름으로 바꾸면 된다.
+#
+# .env.remote(프로젝트 루트, git에는 안 올라감)에 이 프로파일 전용 값(실제 base-url,
+# API 키 등)을 따로 둘 수 있다. remote 프로파일이 활성화될 때만 같이 로드된다.
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  config:
+    import: optional:file:.env.remote[.properties]
+
+langchain4j:
+  ollama:
+    chat-model:
+      base-url: ${OLLAMA_CHAT_BASE_URL:http://kosiidvlp.iptime.org:38000/v1}
+      api-key: ${OLLAMA_CHAT_API_KEY:}
+      api-type: ${OLLAMA_CHAT_API_TYPE:openai}
+      model-name: ${OLLAMA_CHAT_MODEL_NAME:}
+      temperature: 0.2
+      timeout: 600s
+      # 원격 GPU 서버는 로컬 CPU보다 훨씬 빠르게 큰 컨텍스트를 처리할 수 있어 더 크게 잡아도 된다.
+      # 실제 값은 GPU VRAM과 선택할 모델의 최대 컨텍스트에 맞춰 조정하세요.
+      num-ctx: ${OLLAMA_CHAT_NUM_CTX:32768}
+    embedding-model:
+      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
+      api-key: ${OLLAMA_EMBEDDING_API_KEY:}
+      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
+      model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
+
+# RAG 설정 - 필요하면 이 프로파일에서만 다르게 조정 (지금은 local과 동일하게 시작)
+rag:
+  similarity:
+    threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
+  top-k: 6
+
+  query-compression:
+    enabled: true
+
+  retrieval:
+    overfetch-multiplier: 3
+    min-chunk-length: 250
+
+    hybrid:
+      enabled: false
+      weight:
+        dense: 1.0
+        lexical: 0.2
+      top-k: 6
+      lexical:
+        word-similarity-threshold: 0.10
+
+  retrieval-log:
+    delete-with-session: true
