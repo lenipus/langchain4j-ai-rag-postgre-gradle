@@ -19,6 +19,9 @@
 .card h2 {
     font-size: 16px;
     margin: 0 0 12px 0;
+    /* .card(#sqlgen-panel)가 .sidebar(색: white) 안에 있어서, 색을 지정 안 하면 흰
+       카드 배경에 흰 글씨로 렌더링되어 "DB 연결"/"테이블 선택" 제목이 안 보이게 된다. */
+    color: #333;
 }
 .row {
     display: flex;
@@ -112,6 +115,9 @@
 .table-list-table td {
     padding: 6px 10px;
     border-bottom: 1px solid #f2f2f2;
+    /* 이 테이블이 어두운 배경(.sidebar)의 흰 글자색을 물려받는 곳(#selected-tables)에서도
+       쓰이므로, 밝은 카드 배경 위에서 보이도록 색을 명시한다. */
+    color: #333;
 }
 .table-list-table tbody tr {
     cursor: pointer;
@@ -128,6 +134,12 @@
     box-sizing: border-box;
     margin-bottom: 10px;
     flex: 0 0 auto;
+}
+/* DB 연결 / 테이블 선택 구역을 시각적으로 구분한다 */
+.sqlgen-section + .sqlgen-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #eee;
 }
 .section-header-row {
     display: flex;
@@ -148,46 +160,53 @@
     font-size: 12px;
 }
 .selected-tables {
-    display: flex;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    gap: 6px;
+    /* 선택 개수와 무관하게 처음부터 이 높이를 유지한다(항목이 적을 때 박스가 작아졌다
+       커졌다 하지 않도록 - 스크린샷 기준 6줄 정도 보이는 높이). */
+    height: 240px;
     overflow-y: auto;
-    padding-right: 4px;
+    border: 1px solid #eee;
+    border-radius: 5px;
+}
+/* 사이드바 폭(280px)이 좁아 체크박스+테이블명+삭제 버튼 3열이 빠듯하므로, 긴 테이블명은
+   말줄임(ellipsis) 처리한다(전체 이름은 title 툴팁으로 확인). 테이블 목록 팝업(#table-list)은
+   폭이 넉넉해 이 규칙을 적용하지 않는다. */
+.selected-tables .table-list-table {
+    table-layout: fixed;
+}
+.selected-tables .table-list-table td.col-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* 체크박스/삭제 열은 최소한만 차지하고, 테이블명 열이 남는 폭을 최대한 가져가도록
+   좁힌다(#table-list 팝업은 폭이 넉넉해 그대로 32px를 쓴다). */
+.selected-tables .table-list-table th.col-check, .selected-tables .table-list-table td.col-check {
+    width: 20px;
+    padding-left: 8px;
+    padding-right: 0;
+}
+.selected-tables .table-list-table th.col-delete, .selected-tables .table-list-table td.col-delete {
+    width: 38px;
+    padding-left: 4px;
+    padding-right: 6px;
 }
 .selected-tables-count {
     font-size: 13px;
     font-weight: normal;
     color: #4CAF50;
 }
-.table-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: #e8f5e9;
-    color: #2e7d32;
-    border: 1px solid #a5d6a7;
-    border-radius: 14px;
-    padding: 4px 6px 4px 12px;
-    font-size: 13px;
-}
-.table-chip-remove {
-    background: none;
-    border: none;
-    color: #2e7d32;
+.table-row-delete-btn {
+    background: #fdecea;
+    border: 1px solid #f1b3ae;
+    color: #c0392b;
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 15px;
-    line-height: 1;
-    padding: 0 4px;
-    visibility: hidden;
-    width: 0;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 1px 5px;
 }
-.table-chip:hover .table-chip-remove {
-    visibility: visible;
-    width: auto;
-}
-.table-chip-remove:hover {
-    color: #1b5e20;
+.table-row-delete-btn:hover {
+    background: #f8d7da;
 }
 .placeholder {
     color: #999;
