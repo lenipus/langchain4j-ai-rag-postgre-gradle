@@ -51,26 +51,33 @@
 
         <!-- SQL 생성 모드 전용 설정(DB 연결/테이블 선택). RAG 관리자 패널과 배타적으로 표시된다. -->
         <div class="card" id="sqlgen-panel" style="display:none; margin-top:20px; padding:15px;">
-            <h2 style="font-size:14px; margin:0 0 10px 0;">DB 연결</h2>
-            <div class="row" style="margin-bottom:8px;">
-                <select id="connection-select" onchange="onConnectionChange()">
-                    <option value="">연결을 선택하세요...</option>
-                </select>
-            </div>
-            <div class="row" style="margin-bottom:14px;">
-                <button class="btn btn-small" onclick="openConnectionModal()">+ 새연결</button>
-                <button class="btn btn-small btn-danger" id="delete-connection-btn" onclick="deleteSelectedConnection()" disabled>연결삭제</button>
-            </div>
-
-            <div class="section-header-row">
-                <h2 style="font-size:14px; margin:0;">테이블 선택 <span id="selected-tables-count" class="selected-tables-count"></span></h2>
-                <div class="section-header-actions">
-                    <button class="btn btn-small btn-danger" id="clear-selected-tables-btn" onclick="clearSelectedTables()" disabled>Clear</button>
-                    <button class="btn btn-small" id="toggle-table-picker-btn" onclick="openTablePickerModal()" disabled>+ 추가</button>
+            <div class="sqlgen-section">
+                <h2 style="font-size:14px; margin:0 0 10px 0;">DB 연결</h2>
+                <div class="row" style="margin-bottom:8px;">
+                    <select id="connection-select" onchange="onConnectionChange()">
+                        <option value="">연결을 선택하세요...</option>
+                    </select>
+                </div>
+                <div class="row">
+                    <button class="btn btn-small" onclick="openConnectionModal()">+ 새연결</button>
+                    <button class="btn btn-small btn-danger" id="delete-connection-btn" onclick="deleteSelectedConnection()" disabled>연결삭제</button>
                 </div>
             </div>
-            <div id="selected-tables" class="selected-tables" style="max-height:240px; min-height:80px; margin-top:8px;">
-                <span class="placeholder">선택된 테이블이 없습니다.</span>
+
+            <div class="sqlgen-section">
+                <div class="section-header-row">
+                    <!-- "(3개 선택됨)"처럼 길게 쓰면 버튼과 폭을 다투다 줄바꿈됐지만(9개 이상
+                         선택 시 실측 확인됨), "(3)"처럼 숫자만 쓰면 짧아서 제목 옆에 그대로
+                         붙여도 줄바꿈되지 않는다. -->
+                    <h2 style="font-size:14px; margin:0;">테이블 선택 <span id="selected-tables-count" class="selected-tables-count"></span></h2>
+                    <div class="section-header-actions">
+                        <button class="btn btn-small" id="toggle-table-picker-btn" onclick="openTablePickerModal()" disabled>+ 추가</button>
+                        <button class="btn btn-small btn-danger" id="delete-selected-tables-btn" onclick="deleteSelectedTables()" disabled>Clear</button>
+                    </div>
+                </div>
+                <div id="selected-tables" class="selected-tables" style="margin-top:8px;">
+                    <span class="placeholder">선택된 테이블이 없습니다.</span>
+                </div>
             </div>
         </div>
     </div>
@@ -214,6 +221,9 @@
         let connections = [];
         let allTables = []; // 현재 선택된 연결의 전체 테이블 목록 ({name, comment})
         let selectedTables = new Set();
+        // "선택된 테이블" 목록에서 삭제 대상으로 체크된 것들. Clear 버튼이 전체 해제가 아니라
+        // 이 체크된 것만 지우도록 바뀌면서 selectedTables와 별도로 관리한다.
+        let tablesMarkedForClear = new Set();
         let sqlGenConnectionsLoaded = false;
 
         // HTML 이스케이프 함수
@@ -711,24 +721,48 @@
                 btn.type = 'button';
                 btn.className = 'code-copy-btn';
                 btn.textContent = '복사';
-                btn.onclick = () => copyText(codeText);
+                btn.onclick = () => copyText(codeText, btn);
                 pre.appendChild(btn);
             });
         }
 
-        function copyText(text) {
+        // 클릭만으로는 복사됐는지 알 수 없다는 피드백에 따라, 버튼 자체에 성공/실패를
+        // 잠깐 표시한다(1.2초 후 원래 문구로 복귀).
+        function copyText(text, btn) {
             navigator.clipboard.writeText(text)
-                .catch(err => alert('복사 실패: ' + err.message));
+                .then(() => flashCopyButton(btn, '복사됨', 'copied'))
+                .catch(err => {
+                    flashCopyButton(btn, '복사 실패', 'copy-failed');
+                    alert('복사 실패: ' + err.message);
+                });
+        }
+
+        function flashCopyButton(btn, label, stateClass) {
+            if (!btn) return;
+            if (btn.dataset.resetTimer) {
+                clearTimeout(Number(btn.dataset.resetTimer));
+            }
+            const original = btn.dataset.originalLabel || btn.textContent;
+            btn.dataset.originalLabel = original;
+            btn.textContent = label;
+            btn.classList.add(stateClass);
+            const timer = setTimeout(() => {
+                btn.textContent = original;
+                btn.classList.remove(stateClass);
+                delete btn.dataset.resetTimer;
+            }, 1200);
+            btn.dataset.resetTimer = String(timer);
         }
 
         // 응답이 오기 전까지(RAG는 문서검색+LLM추론으로 수십 초까지 걸릴 수 있음) 그냥
         // '...' 만 떠 있으면 멈춘 것처럼 보이므로, 점 애니메이션 + 순환 문구로 진행 중임을 보여준다.
+        //
+        // 예전엔 "질문을 정리하고 있어요" -> "문서를 검색하고 있어요" -> ... 처럼 실제 처리
+        // 단계인 것처럼 문구를 세분화했었는데, 이건 실제 서버 진행 상황과 무관하게 그냥
+        // 타이머로 순서대로 도는 것뿐이라 오해를 준다는 피드백에 따라 정직하게 문구 2개만
+        // 순환한다(mode 무관 - 실제 단계 추적은 별도로 검토 중).
         function startThinkingIndicator(container, mode) {
-            const phrases = mode === 'rag'
-                ? ['이전 대화를 참고해 질문을 정리하고 있어요...', '관련 문서를 검색하고 있어요...', '검색된 내용을 검토하고 있어요...', '답변을 작성하고 있어요...', '조금만 더 기다려주세요...']
-                : mode === 'sqlgen'
-                ? ['테이블 스키마를 확인하고 있어요...', 'SQL 쿼리를 작성하고 있어요...', '조금만 더 기다려주세요...']
-                : ['질문을 이해하고 있어요...', '답변을 생각하고 있어요...', '답변을 작성하고 있어요...', '조금만 더 기다려주세요...'];
+            const phrases = ['답변을 작성하고 있어요...', '조금만 더 기다려주세요...'];
 
             container.innerHTML = '<div class="thinking-indicator">' +
                 '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
@@ -1111,8 +1145,17 @@
                             statusText.textContent = '문서를 처리하고 있습니다...';
                             progressContainer.style.display = 'block';
                             cancelBtn.style.display = 'block';
-                            cancelBtn.disabled = false;
-                            cancelBtn.textContent = '중지';
+                            // 취소 요청이 이미 접수됐으면(병렬 처리 중이라 이미 제출된 파일들이
+                            // 끝날 때까지 processing이 계속 true일 수 있음) 버튼을 다시 활성화하지
+                            // 않는다. 그렇지 않으면 이 1초 폴링이 매번 disabled를 풀어버려서
+                            // 중지 버튼을 눌러도 곧바로 다시 눌러지는 것처럼 보인다.
+                            if (data.cancelRequested) {
+                                cancelBtn.disabled = true;
+                                cancelBtn.textContent = '중지 중...';
+                            } else {
+                                cancelBtn.disabled = false;
+                                cancelBtn.textContent = '중지';
+                            }
 
                             // 처리 중에는 재인덱싱/초기화/업로드 모두 막아 동시 작업 충돌 방지
                             reindexBtn.disabled = true;
@@ -1664,49 +1707,124 @@
             tableListEl.appendChild(table);
         }
 
-        // 체크된 테이블만 따로 칩 형태로 보여준다. 칩의 x를 누르면 선택 해제된다.
+        // 선택된 테이블을 목록(체크박스 + 테이블명 + 삭제 버튼)으로 보여준다.
+        // 체크박스는 Clear 버튼으로 한꺼번에 지울 대상을 고르는 용도이고(tablesMarkedForClear),
+        // "삭제" 버튼은 그 줄 하나만 바로 선택 해제한다.
         function renderSelectedTables() {
             const selectedEl = document.getElementById('selected-tables');
             const countEl = document.getElementById('selected-tables-count');
-            const clearBtn = document.getElementById('clear-selected-tables-btn');
-            countEl.textContent = selectedTables.size > 0 ? `(${selectedTables.size}개 선택됨)` : '';
-            clearBtn.disabled = selectedTables.size === 0;
+            const clearBtn = document.getElementById('delete-selected-tables-btn');
+            countEl.textContent = selectedTables.size > 0 ? `(${selectedTables.size})` : '';
+
+            // selectedTables에서 이미 빠진 테이블이 tablesMarkedForClear에 남아있지 않도록 정리한다.
+            Array.from(tablesMarkedForClear).forEach(name => {
+                if (!selectedTables.has(name)) {
+                    tablesMarkedForClear.delete(name);
+                }
+            });
+            clearBtn.disabled = tablesMarkedForClear.size === 0;
 
             if (selectedTables.size === 0) {
                 selectedEl.innerHTML = '<span class="placeholder">선택된 테이블이 없습니다.</span>';
                 return;
             }
 
-            selectedEl.innerHTML = '';
-            Array.from(selectedTables).forEach(tableName => {
-                const chip = document.createElement('span');
-                chip.className = 'table-chip';
-                chip.appendChild(document.createTextNode(tableName));
+            const tableNames = Array.from(selectedTables);
 
-                const removeBtn = document.createElement('button');
-                removeBtn.type = 'button';
-                removeBtn.className = 'table-chip-remove';
-                removeBtn.textContent = '×';
-                removeBtn.onclick = () => {
+            const table = document.createElement('table');
+            table.className = 'table-list-table';
+
+            const selectAllCheckbox = document.createElement('input');
+            selectAllCheckbox.type = 'checkbox';
+            selectAllCheckbox.title = '전체 선택/해제';
+            selectAllCheckbox.checked = tableNames.every(name => tablesMarkedForClear.has(name));
+            selectAllCheckbox.onclick = () => {
+                tableNames.forEach(name => {
+                    if (selectAllCheckbox.checked) {
+                        tablesMarkedForClear.add(name);
+                    } else {
+                        tablesMarkedForClear.delete(name);
+                    }
+                });
+                renderSelectedTables();
+            };
+
+            const theadRow = document.createElement('tr');
+            const selectAllTh = document.createElement('th');
+            selectAllTh.className = 'col-check';
+            selectAllTh.appendChild(selectAllCheckbox);
+            const nameTh = document.createElement('th');
+            nameTh.textContent = '테이블명';
+            const deleteTh = document.createElement('th');
+            deleteTh.className = 'col-delete';
+            theadRow.appendChild(selectAllTh);
+            theadRow.appendChild(nameTh);
+            theadRow.appendChild(deleteTh);
+
+            const thead = document.createElement('thead');
+            thead.appendChild(theadRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            tableNames.forEach(tableName => {
+                const tr = document.createElement('tr');
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = tablesMarkedForClear.has(tableName);
+                checkbox.onclick = (event) => {
+                    event.stopPropagation();
+                    if (checkbox.checked) {
+                        tablesMarkedForClear.add(tableName);
+                    } else {
+                        tablesMarkedForClear.delete(tableName);
+                    }
+                    renderSelectedTables();
+                };
+
+                const checkTd = document.createElement('td');
+                checkTd.className = 'col-check';
+                checkTd.appendChild(checkbox);
+
+                // 사이드바 폭(280px)이 좁아 긴 테이블명은 말줄임되므로, 전체 이름은 title
+                // 툴팁으로 확인할 수 있게 한다.
+                const nameTd = document.createElement('td');
+                nameTd.className = 'col-name';
+                nameTd.textContent = tableName;
+                nameTd.title = tableName;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'table-row-delete-btn';
+                deleteBtn.textContent = '삭제';
+                deleteBtn.onclick = () => {
                     selectedTables.delete(tableName);
+                    tablesMarkedForClear.delete(tableName);
                     renderSelectedTables();
                     renderTableList();
                 };
+                const deleteTd = document.createElement('td');
+                deleteTd.className = 'col-delete';
+                deleteTd.appendChild(deleteBtn);
 
-                chip.appendChild(removeBtn);
-                selectedEl.appendChild(chip);
+                tr.appendChild(checkTd);
+                tr.appendChild(nameTd);
+                tr.appendChild(deleteTd);
+                tbody.appendChild(tr);
             });
+            table.appendChild(tbody);
+
+            selectedEl.innerHTML = '';
+            selectedEl.appendChild(table);
         }
 
-        // 선택된 테이블을 전부 해제한다.
-        function clearSelectedTables() {
-            if (selectedTables.size === 0) {
+        // Clear 버튼: 체크된(tablesMarkedForClear) 테이블만 선택 해제한다.
+        function deleteSelectedTables() {
+            if (tablesMarkedForClear.size === 0) {
                 return;
             }
-            if (!confirm(`선택된 테이블 ${selectedTables.size}개를 모두 해제하시겠습니까?`)) {
-                return;
-            }
-            selectedTables.clear();
+            tablesMarkedForClear.forEach(name => selectedTables.delete(name));
+            tablesMarkedForClear.clear();
             renderSelectedTables();
             renderTableList();
         }
