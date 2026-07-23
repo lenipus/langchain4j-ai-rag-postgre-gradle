@@ -7,7 +7,9 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
@@ -45,6 +47,7 @@ public class ChatbotFactory {
     private final PersistentChatMemoryStore chatMemoryStore;
     private final StreamingChatModel defaultStreamingModel;
     private final ChatModel queryCompressionChatModel;
+    private final EgovOllamaModelService ollamaModelService;
 
     @Value("${rag.query-compression.enabled:true}")
     private boolean queryCompressionEnabled;
@@ -87,7 +90,8 @@ public class ChatbotFactory {
             PersistentChatMemoryStore chatMemoryStore,
             StreamingChatModel defaultStreamingModel,
             ChatModel queryCompressionChatModel,
-            RagRetrievalLogRepository ragRetrievalLogRepository) {
+            RagRetrievalLogRepository ragRetrievalLogRepository,
+            EgovOllamaModelService ollamaModelService) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
         // 실제 EgovLoggingContentRetriever는 질의(턴)마다 turnId를 새로 발급해 createRagChatbot()에서
         // 매번 새로 감싸 만든다 (아래 selectedRetriever는 그 delegate로만 쓰인다).
@@ -96,6 +100,7 @@ public class ChatbotFactory {
         this.chatMemoryStore = chatMemoryStore;
         this.defaultStreamingModel = defaultStreamingModel;
         this.queryCompressionChatModel = queryCompressionChatModel;
+        this.ollamaModelService = ollamaModelService;
 
         if (hybridContentRetriever != null) {
             log.info("ChatbotFactory - 하이브리드 ContentRetriever 사용");
@@ -138,9 +143,12 @@ public class ChatbotFactory {
         if (queryCompressionEnabled) {
             // 후속 질문(대명사·생략형)이 이전 대화를 반영 못 한 채 그대로 검색되는 문제를
             // 완화하기 위해, 검색 전에 (이전 대화 + 현재 질문)을 독립형 질문으로 압축한다.
+            ChatModel compressionModel = isDefaultModel(modelName)
+                    ? queryCompressionChatModel
+                    : createQueryCompressionModel(modelName);
             RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
                     .queryTransformer(loggingQueryTransformer(
-                            new CompressingQueryTransformer(queryCompressionChatModel), originalQueryTextHolder))
+                            new CompressingQueryTransformer(compressionModel), originalQueryTextHolder))
                     .contentRetriever(loggingRetriever)
                     .build();
             builder.retrievalAugmentor(retrievalAugmentor);
@@ -191,10 +199,6 @@ public class ChatbotFactory {
 
     /**
      * SQL 생성 챗봇 인스턴스 생성
-     * - RAG처럼 벡터 검색을 하는 게 아니라, 호출부(EgovChatServiceImpl)가 사용자가 선택한
-     *   테이블의 스키마 텍스트를 이미 사용자 메시지에 붙여서 넘겨주므로 ContentRetriever는
-     *   필요 없다. Simple 챗봇과 동일하게 세션별 ChatMemory만 있으면 된다 - turnId 기반
-     *   감사 로그(rag_retrieval_logs 같은)는 SQL 생성엔 없어서 turnId 없는 오버로드를 쓴다.
      *
      * @param modelName 사용할 모델명 (null이면 기본 모델)
      * @param sessionId 세션 ID (메모리 관리용)
@@ -287,10 +291,61 @@ public class ChatbotFactory {
                 .modelName(modelName)
                 .temperature(defaultTemperature)
                 .timeout(defaultTimeout);
-        if (chatModelNumCtx != null && chatModelNumCtx > 0) {
-            builder.numCtx(chatModelNumCtx);
+        int numCtx = resolveNumCtx(modelName);
+        if (numCtx > 0) {
+            builder.numCtx(numCtx);
         }
         return builder.build();
+    }
+
+    /**
+     * 질의 압축용(비스트리밍) 모델 생성. createStreamingModel()과 동일한 규칙(api-type에 따라
+     * OpenAI 호환/Ollama 네이티브)을 따르되, 스트리밍이 필요 없는 {@link ChatModel}을 만든다.
+     */
+    private ChatModel createQueryCompressionModel(String modelName) {
+        if ("openai".equalsIgnoreCase(chatModelApiType)) {
+            String apiKey = (chatModelApiKey == null || chatModelApiKey.isBlank()) ? "not-needed" : chatModelApiKey;
+            return OpenAiChatModel.builder()
+                    .baseUrl(chatModelBaseUrl)
+                    .apiKey(apiKey)
+                    .modelName(modelName)
+                    .temperature(defaultTemperature)
+                    .timeout(defaultTimeout)
+                    .build();
+        }
+        var builder = OllamaChatModel.builder()
+                .baseUrl(chatModelBaseUrl)
+                .modelName(modelName)
+                .temperature(defaultTemperature)
+                .timeout(defaultTimeout);
+        int numCtx = resolveNumCtx(modelName);
+        if (numCtx > 0) {
+            builder.numCtx(numCtx);
+        }
+        return builder.build();
+    }
+
+    /**
+     * 실제로 Ollama에 요청할 num_ctx 값을 모델별로 정한다.
+     *
+     * <p>{@code langchain4j.ollama.chat-model.num-ctx}(설정값, 예: 40960)는 상한선으로 쓰고,
+     * 실제 선택된 모델이 그보다 작은 컨텍스트만 지원하면({@link EgovOllamaModelService#getContextLength}로
+     * 조회) 모델 한계에 맞춰 깎는다. 모델 정보를 못 가져오면 설정값을 그대로 쓰고, 설정값이
+     * 없으면(0) 모델 한계를 그대로 쓴다 - 둘 다 없으면 0을 반환해 Ollama 자체 기본값에 맡긴다.
+     *
+     * <p>예: 상한 40960 기준으로 gemma2:2b(한계 8192)는 8192로, qwen3:4b(한계 40960)는
+     * 40960 그대로, hyperclova(한계 131072)는 상한인 40960으로 깎인다.</p>
+     */
+    // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
+    int resolveNumCtx(String modelName) {
+        Integer modelMaxContext = ollamaModelService.getContextLength(modelName).orElse(null);
+        if (modelMaxContext == null) {
+            return chatModelNumCtx != null ? chatModelNumCtx : 0;
+        }
+        if (chatModelNumCtx != null && chatModelNumCtx > 0) {
+            return Math.min(chatModelNumCtx, modelMaxContext);
+        }
+        return modelMaxContext;
     }
 
     /**

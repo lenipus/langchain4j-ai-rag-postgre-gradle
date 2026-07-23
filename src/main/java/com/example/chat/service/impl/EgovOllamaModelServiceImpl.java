@@ -18,7 +18,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Ollama 모델 관리 서비스 구현 (채팅 모델 드롭다운용)
@@ -47,6 +51,67 @@ public class EgovOllamaModelServiceImpl extends EgovAbstractServiceImpl implemen
 
     private boolean isRemoteMode() {
         return "openai".equalsIgnoreCase(chatModelApiType);
+    }
+
+    // 모델별 컨텍스트 길이는 자주 안 바뀌므로, 조회 한 번이면 계속 재사용한다(매 요청마다
+    // /api/show를 다시 부르지 않도록).
+    private final Map<String, Integer> contextLengthCache = new ConcurrentHashMap<>();
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>{@code /api/show}는 Ollama 네이티브 API 전용이라 원격(openai 호환) 모드에서는
+     * 시도하지 않고 바로 empty를 반환한다. {@code model_info} 안의 키 이름은 아키텍처마다
+     * 다르므로(예: {@code qwen3.context_length}, {@code gemma2.context_length})
+     * {@code .context_length}로 끝나는 키를 찾아서 쓴다.</p>
+     */
+    @Override
+    public Optional<Integer> getContextLength(String modelName) {
+        if (modelName == null || modelName.isBlank() || isRemoteMode()) {
+            return Optional.empty();
+        }
+
+        Integer cached = contextLengthCache.get(modelName);
+        if (cached != null) {
+            return Optional.of(cached);
+        }
+
+        String url = chatModelBaseUrl.replaceAll("/+$", "") + "/api/show";
+        try {
+            String requestBody = objectMapper.writeValueAsString(Map.of("model", modelName));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                log.warn("모델 정보 조회 실패 - model: {}, status: {}", modelName, response.statusCode());
+                return Optional.empty();
+            }
+
+            JsonNode modelInfo = objectMapper.readTree(response.body()).path("model_info");
+            Iterator<String> fieldNames = modelInfo.fieldNames();
+            while (fieldNames.hasNext()) {
+                String field = fieldNames.next();
+                if (field.endsWith(".context_length")) {
+                    int contextLength = modelInfo.get(field).asInt();
+                    contextLengthCache.put(modelName, contextLength);
+                    log.debug("모델 컨텍스트 길이 조회 - model: {}, context_length: {}", modelName, contextLength);
+                    return Optional.of(contextLength);
+                }
+            }
+            log.warn("모델 정보에서 context_length를 찾지 못했습니다 - model: {}", modelName);
+            return Optional.empty();
+        } catch (IOException | InterruptedException e) {
+            log.warn("모델 컨텍스트 길이 조회 중 오류 발생 - model: {}, url: {}", modelName, url, e);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return Optional.empty();
+        }
     }
 
     /** ollama list 등이 데몬 응답 지연 등으로 빈 목록을 반환했을 때 재시도 전 대기 시간 */

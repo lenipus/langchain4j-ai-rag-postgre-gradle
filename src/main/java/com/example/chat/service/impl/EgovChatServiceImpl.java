@@ -16,6 +16,8 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 세션별 채팅 서비스 구현체
@@ -65,8 +67,12 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                     .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
 
         } catch (Exception e) {
+            // 질의 압축(CompressingQueryTransformer) 등은 스트림이 만들어지기 전에 동기적으로
+            // 실행되므로, 컨텍스트 초과 같은 오류가 여기서 터지면 Flux.error()로 그냥 던져서는
+            // 프론트(EventSource)가 원인을 전혀 알 수 없는 연결 끊김으로만 본다. 503 처리와
+            // 동일하게 스트림 안에서 친화적 메시지로 전달한다.
             log.error("RAG 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
-            return Flux.error(e);
+            return Flux.just("\n[오류: " + friendlyErrorMessage(e) + "]");
         }
     }
 
@@ -103,7 +109,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
 
         } catch (Exception e) {
             log.error("Simple 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
-            return Flux.error(e);
+            return Flux.just("\n[오류: " + friendlyErrorMessage(e) + "]");
         }
     }
 
@@ -146,7 +152,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
 
         } catch (Exception e) {
             log.error("SQL 생성 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
-            return Flux.error(e);
+            return Flux.just("\n[오류: " + friendlyErrorMessage(e) + "]");
         }
     }
 
@@ -197,8 +203,35 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      * 예외 처리
      */
     private String handleException(Exception e) {
-        String errorMessage = e.getMessage();
+        return friendlyErrorMessage(e);
+    }
 
+    // Ollama 원본 오류 본문이 langchain4j 예외 메시지 안에 JSON-in-JSON으로 한 번 더 감싸여
+    // 오므로, 실제 메시지에는 큰따옴표 앞에 이스케이프 백슬래시(\")가 그대로 문자로 남아있다
+    // (예: ...\"n_prompt_tokens\":13018...). 그래서 따옴표 앞의 백슬래시는 있어도 없어도
+    // 매칭되게 \\* 로 느슨하게 잡는다.
+    private static final Pattern PROMPT_TOKENS_PATTERN = Pattern.compile("n_prompt_tokens\\\\*\"?\\s*:\\s*(\\d+)");
+    private static final Pattern CTX_TOKENS_PATTERN = Pattern.compile("n_ctx\\\\*\"?\\s*:\\s*(\\d+)");
+
+    /**
+     * 예외를 사용자에게 보여줄 친화적인 한국어 메시지로 변환한다. 원인 체인을 훑어 Ollama의
+     * "컨텍스트 크기 초과"(exceed_context_size_error) 오류처럼 구체적인 원인을 알 수 있는
+     * 경우 실제 토큰 수까지 포함한 메시지를 만들고, 그 외에는 기존 타임아웃/연결 오류
+     * 메시지로, 마지막엔 원본 메시지를 그대로 붙인 범용 메시지로 폴백한다.
+     *
+     * <p>이 메서드가 필요했던 이유: 채팅 기록이 길어져 모델의 컨텍스트 창을 넘기면 Ollama가
+     * "model is required"처럼 뭉뚱그린 게 아니라 실제 토큰 수(n_prompt_tokens/n_ctx)를
+     * 정확히 알려주는데, 그동안은 이 정보를 그냥 버리고 "네트워크 연결을 확인해 주세요"처럼
+     * 아무 단서도 없는 메시지만 보여줬었다.</p>
+     */
+    // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
+    String friendlyErrorMessage(Throwable e) {
+        String contextSizeMessage = findContextSizeExceededMessage(e);
+        if (contextSizeMessage != null) {
+            return contextSizeMessage;
+        }
+
+        String errorMessage = e.getMessage();
         if (errorMessage != null && (errorMessage.contains("timeout")
                 || errorMessage.contains("timed out")
                 || errorMessage.contains("connection")
@@ -208,6 +241,30 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         }
 
         return "죄송합니다. 응답을 생성하는 중에 오류가 발생했습니다: " + errorMessage;
+    }
+
+    /**
+     * 원인 체인(getCause 연쇄)을 훑어 Ollama의 컨텍스트 크기 초과 오류를 찾는다. 찾으면
+     * 오류 본문에 실려오는 n_prompt_tokens/n_ctx 값으로 구체적인 메시지를 만들고, 그 표시가
+     * 없으면 null을 반환해 다른 폴백 메시지로 넘어가게 한다.
+     */
+    private String findContextSizeExceededMessage(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            String msg = t.getMessage();
+            if (msg == null || !msg.contains("exceed_context_size_error")) {
+                continue;
+            }
+            Matcher promptMatcher = PROMPT_TOKENS_PATTERN.matcher(msg);
+            Matcher ctxMatcher = CTX_TOKENS_PATTERN.matcher(msg);
+            if (promptMatcher.find() && ctxMatcher.find()) {
+                return String.format(
+                        "대화 내용이 너무 길어 답변을 생성할 수 없습니다 (%s / %s 토큰). "
+                                + "새 대화를 시작하거나 더 짧게 질문해주세요.",
+                        promptMatcher.group(1), ctxMatcher.group(1));
+            }
+            return "대화 내용이 너무 길어 답변을 생성할 수 없습니다. 새 대화를 시작하거나 더 짧게 질문해주세요.";
+        }
+        return null;
     }
 
     private Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
@@ -224,7 +281,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                 )
                 .onErrorResume(e -> {
                     log.error("[{}] 스트리밍 최종 실패 - 세션: {}", serviceType, sessionId, e);
-                    return Flux.just("\n[오류: 서비스 응답이 지연되거나 일시적으로 이용 불가능합니다. 잠시 후 다시 시도해주세요.]");
+                    return Flux.just("\n[오류: " + friendlyErrorMessage(e) + "]");
                 });
     }
 }
