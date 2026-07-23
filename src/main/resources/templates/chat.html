@@ -761,21 +761,44 @@
         // 단계인 것처럼 문구를 세분화했었는데, 이건 실제 서버 진행 상황과 무관하게 그냥
         // 타이머로 순서대로 도는 것뿐이라 오해를 준다는 피드백에 따라 정직하게 문구 2개만
         // 순환한다(mode 무관 - 실제 단계 추적은 별도로 검토 중).
+        // 대기 시간이 눈에 보이면 얼마나 더 기다려야 할지 감이라도 잡을 수 있다는 피드백에
+        // 따라, 문구 옆에 경과 시간을 (1s), 60초가 넘으면 (1m 2s) 형식으로 같이 보여준다.
+        function formatElapsedTime(elapsedMs) {
+            const totalSeconds = Math.floor(elapsedMs / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        }
+
         function startThinkingIndicator(container, mode) {
             const phrases = ['답변을 작성하고 있어요...', '조금만 더 기다려주세요...'];
+            const startTime = Date.now();
 
             container.innerHTML = '<div class="thinking-indicator">' +
                 '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
-                '<span class="thinking-text">' + phrases[0] + '</span></div>';
+                '<span class="thinking-text">' + phrases[0] + '</span>' +
+                '<span class="thinking-elapsed">(0s)</span></div>';
 
             let index = 0;
+            // 문구 순환(4초 간격)과 경과 시간 표시(1초 간격)를 인터벌 하나로 같이 처리한다
+            // (별도 인터벌 두 개를 두면 정리할 때 둘 다 clearInterval 해줘야 해서 번거롭다).
             return setInterval(() => {
-                index = (index + 1) % phrases.length;
+                const elapsedMs = Date.now() - startTime;
+                const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+                if (elapsedSeconds > 0 && elapsedSeconds % 4 === 0) {
+                    index = (index + 1) % phrases.length;
+                }
+
                 const textEl = container.querySelector('.thinking-text');
                 if (textEl) {
                     textEl.textContent = phrases[index];
                 }
-            }, 4000);
+                const elapsedEl = container.querySelector('.thinking-elapsed');
+                if (elapsedEl) {
+                    elapsedEl.textContent = '(' + formatElapsedTime(elapsedMs) + ')';
+                }
+            }, 1000);
         }
 
         function sendMessage() {

@@ -33,21 +33,15 @@
     </Appenders>
 
     <Loggers>
-        <!-- Spring Profile: default / local -->
-        <SpringProfile name="default | local">
-            <Root level="INFO">
-                <AppenderRef ref="Console" />
-                <AppenderRef ref="RollingFile" />
-            </Root>
-        </SpringProfile>
-
-        <!-- Spring Profile: prod -->
-        <SpringProfile name="prod">
-            <Root level="INFO">
-                <AppenderRef ref="Console" />
-                <AppenderRef ref="RollingFile" />
-            </Root>
-        </SpringProfile>
+        <!-- 어떤 Spring 프로파일(local/remote/prod 등)이 활성화되든 항상 적용된다.
+             예전엔 SpringProfile로 "default | local"/"prod"만 나눠뒀었는데 두 블록
+             내용이 완전히 똑같았고, 정작 "remote" 프로파일은 어느 쪽에도 안 걸려서
+             Root 로거 자체가 설정 안 된 채로 log4j2 기본 동작(형식도 다르고 파일도
+             안 만들어짐)으로 빠지는 문제가 있었다. -->
+        <Root level="INFO">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="RollingFile" />
+        </Root>
     </Loggers>
 
 </Configuration>

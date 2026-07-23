@@ -5,6 +5,18 @@ spring:
   application:
     name: langchain4j-ai-rag-postgre
 
+  # .env(프로젝트 루트, git에는 안 올라감 - .gitignore 참고)에 있는 값을 환경변수처럼
+  # 읽어온다. DB 비밀번호/암호화 키 등 프로필과 무관하게 공통인 비밀값은 여기에 둔다.
+  # optional:이라 파일이 없어도(예: CI, 이미 실제 OS 환경변수로 주입하는 배포 환경) 에러 없이 넘어간다.
+  config:
+    import: optional:file:.env[.properties]
+
+  # 채팅 서버(langchain4j.ollama.*)/RAG 튜닝처럼 환경마다 값이 다른 설정은
+  # application-{profile}.yml로 분리했다. SPRING_PROFILES_ACTIVE 환경변수로 전환하며,
+  # 안 정하면 기본으로 "local" 프로파일(application-local.yml)이 적용된다.
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
   servlet:
     multipart:
       max-file-size: 100MB
@@ -71,7 +83,7 @@ langchain4j:
       api-key: ${OLLAMA_CHAT_API_KEY:}
       api-type: ${OLLAMA_CHAT_API_TYPE:ollama}        # API 규격: (ollama, openai)
       model-name: ${OLLAMA_CHAT_MODEL_NAME:}
-      temperature: 0.2
+      temperature: 0.4
       timeout: 300s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:8192}
     embedding-model:
@@ -111,7 +123,7 @@ document:
 rag:
   similarity:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
-  top-k: 6
+  top-k: 3
 
   query-compression:
     enabled: true
@@ -128,13 +140,16 @@ rag:
       weight:
         dense: 1.0
         lexical: 0.2
-      top-k: 6
+      top-k: 3
       lexical:
         word-similarity-threshold: 0.10
 
   # RAG 검색 감사 로그(rag_retrieval_logs, EgovLoggingContentRetriever가 기록) 관련 설정.
   retrieval-log:
     delete-with-session: true
+
+# RAG 설정, LangChain4j Ollama(채팅 서버) 설정은 environment마다 값이 달라 각각의
+# application-{profile}.yml(application-local.yml, application-remote.yml 등)로 옮겼다.
 
 # 채팅 메모리 설정
 chat:
@@ -149,11 +164,7 @@ session:
 # SQL 생성 도구(com.example.sqlgen) 설정
 sqlgen:
   encryption:
-    # 등록된 DB 연결의 비밀번호를 암호화하는 AES-256 키(Base64, 32바이트).
-    # 새 키 발행
-    #   PowerShell: $b=New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
-    #   Git Bash(openssl): openssl rand -base64 32
-    secret-key: ${SQLGEN_ENCRYPTION_KEY:bd9aNsMfEM9jvt6Qbb9SnmozRSZSpSvMMchdNo2MO7M=}
+    secret-key: ${SQLGEN_ENCRYPTION_KEY:}
 
 # 로깅 설정
 logging:

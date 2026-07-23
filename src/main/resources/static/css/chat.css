@@ -296,6 +296,11 @@ h1 {
     display: inline-flex;
     gap: 4px;
 }
+.thinking-elapsed {
+    color: #999;
+    font-size: 12px;
+    font-style: normal;
+}
 .thinking-dots span {
     width: 6px;
     height: 6px;

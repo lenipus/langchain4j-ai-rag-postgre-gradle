@@ -23,3 +23,10 @@ upload/data/
 
 # IntelliJ 프로젝트 메타데이터 (개인 환경, 공유 불필요)
 .idea/
+
+# 실제 비밀값(DB 비번/API 키 등)이 들어가는 환경변수 파일 - 절대 커밋하지 않는다.
+# 어떤 값을 채워야 하는지는 .env.example / .env.local.example / .env.remote.example 참고.
+.env
+.env.local
+.env.remote
+.env.*.local
