@@ -69,6 +69,11 @@ class EgovDocumentServiceImplCancelTest {
             List<Document> chunks = invocation.getArgument(0);
             if (!chunks.isEmpty() && "doc-1".equals(chunks.get(0).metadata().getString("id"))) {
                 service.cancelProcessing();
+                // 취소 직후에도 아직 처리 중이므로, /api/documents/status를 폴링하는
+                // 프론트가 이 시점에 취소 요청 사실을 알 수 있어야 "중지" 버튼을 다시
+                // 활성화하지 않는다(관련: chat.html의 cancelRequested 분기).
+                assertThat(service.isCancelRequested()).isTrue();
+                assertThat(service.getStatusResponse().cancelRequested()).isTrue();
             }
             return null;
         }).when(vectorStoreWriter).write(anyList());
@@ -80,5 +85,8 @@ class EgovDocumentServiceImplCancelTest {
         verify(documentHashRepository, never()).save(argThat(entity -> "doc-2".equals(entity.getDocId())));
         verify(vectorStoreWriter, never()).write(List.of(doc2));
         assertThat(service.isProcessing()).isFalse();
+        // 처리가 끝나면 다음 실행을 위해 취소 플래그도 함께 초기화된다.
+        assertThat(service.isCancelRequested()).isFalse();
+        assertThat(service.getStatusResponse().cancelRequested()).isFalse();
     }
 }

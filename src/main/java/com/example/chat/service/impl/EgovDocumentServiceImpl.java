@@ -99,6 +99,11 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     }
 
     @Override
+    public boolean isCancelRequested() {
+        return cancelRequested.get();
+    }
+
+    @Override
     public CompletableFuture<Integer> loadDocumentsAsync() {
         // 검사·설정을 단일 원자 연산으로 처리하여 동시 진입(TOCTOU)을 차단한다.
         if (!isProcessing.compareAndSet(false, true)) {
@@ -324,7 +329,8 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
                 this.isProcessing(),
                 this.getProcessedCount(),
                 this.getTotalCount(),
-                this.getChangedCount());
+                this.getChangedCount(),
+                this.isCancelRequested());
     }
 
     /**

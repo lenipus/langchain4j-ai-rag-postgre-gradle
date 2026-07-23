@@ -29,6 +29,10 @@ public interface EgovDocumentService {
 
     int getChangedCount();
 
+    // 취소 요청 후 아직 완전히 멈추지 않은 상태인지 여부 (병렬 처리 중 이미 제출된 파일들은
+    // 취소 요청 이후에도 끝까지 실행되므로, 처리 중 상태가 곧바로 꺼지지 않을 수 있다)
+    boolean isCancelRequested();
+
     // 파일 업로드 및 검증/저장
     Map<String, Object> uploadMarkdownFiles(MultipartFile[] files);
 
