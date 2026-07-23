@@ -1,6 +1,3 @@
-// Maven(pom.xml, pom_tomcat.xml)과 동일한 소스에 대한 Gradle 빌드 설정.
-// 기존 Maven 빌드는 그대로 두고, Gradle로도 빌드할 수 있도록 추가한 것.
-// 버전 관리는 pom.xml의 <parent>와 동일하게 egovframe-boot-starter-parent BOM을 그대로 가져와 사용한다.
 plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.6'
@@ -18,11 +15,8 @@ java {
 }
 
 repositories {
-    // 사내 Nexus (Maven의 settings.xml mirrorOf=*와 동일한 저장소를 우선 사용).
-    // Gradle은 Maven의 settings.xml을 읽지 않으므로 여기서 직접 지정해야 한다.
     maven {
         url 'http://kosiidvlp.iptime.org:11081/nexus/content/groups/public/'
-        // Nexus가 http(평문)로만 서비스되므로 Gradle의 기본 HTTPS 강제를 해제
         allowInsecureProtocol = true
     }
     mavenCentral()
@@ -31,100 +25,66 @@ repositories {
 
 dependencyManagement {
     imports {
-        // pom.xml의 <parent>egovframe-boot-starter-parent</parent>와 동일한 BOM.
-        // Spring Boot, LangChain4j, eGovFrame RTE, Testcontainers 등의 버전을 여기서 그대로 가져온다.
         mavenBom 'org.egovframe.boot:egovframe-boot-starter-parent:5.0.0'
     }
 }
 
-// pom.xml은 각 스타터마다 spring-boot-starter-logging(logback)을 exclusion으로 제거하는데,
-// Gradle에서는 개별 dependency 블록의 exclude가 spring-boot-starter-actuator처럼
-// 더 깊은 전이 경로(actuator -> spring-boot-starter -> spring-boot-starter-logging)까지는
-// 적용되지 않는 경우가 있어(spring-boot-starter-test 경로 포함) 모든 configuration에
-// 전역으로 걸어 logback을 확실히 제거한다. eGovFrame RTE(egovframe-rte-ptl-mvc)가
-// 직접 끌어오는 log4j2(log4j-core, log4j-slf4j2-impl)만 남아야 한다.
-// (logback과 log4j-to-slf4j가 log4j-slf4j2-impl과 함께 있으면 LoggingException 발생)
 configurations.configureEach {
     exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
 }
 
 dependencies {
-    // 개발 편의: 템플릿/정적 리소스 캐시 자동 비활성화 + 클래스 변경 시 빠른 재시작
-    // (템플릿/정적 리소스 변경은 재시작 없이 바로 반영됨). 배포용 jar에는 포함되지 않음.
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // LangChain4j Core
     implementation 'dev.langchain4j:langchain4j'
 
-    // LangChain4j Ollama Integration (로컬 Ollama 네이티브 API 클라이언트)
     implementation 'dev.langchain4j:langchain4j-ollama'
 
-    // LangChain4j OpenAI 호환 클라이언트 (원격 Ollama 호환 서버 - 채팅/임베딩 공용)
-    // BOM(egovframe-boot-starter-parent)에 이 모듈 버전이 없어 langchain4j-ollama와 동일한 1.8.0으로 명시
     implementation 'dev.langchain4j:langchain4j-open-ai:1.8.0'
 
-    // LangChain4j PGVector Store
     implementation 'dev.langchain4j:langchain4j-pgvector'
 
-    // LangChain4j ONNX Embeddings
     implementation 'dev.langchain4j:langchain4j-embeddings'
 
-    // LangChain4j Document Parsers
     implementation 'dev.langchain4j:langchain4j-document-parser-apache-pdfbox'
 
-    // eGovFrame Excel (POI OOXML 전이 의존성 — DOCX 파싱)
     implementation('org.egovframe.rte:egovframe-rte-fdl-excel') {
         exclude group: 'org.apache.commons', module: 'commons-lang3'
     }
 
-    // LangChain4j Reactor (Flux 스트리밍 지원)
     implementation 'dev.langchain4j:langchain4j-reactor'
 
-    // H2 Database (인메모리 H2, MODE=PostgreSQL로 PostgreSQL 호환 모드)
     testImplementation 'com.h2database:h2:2.2.224'
 
-    // PostgreSQL Driver
     runtimeOnly 'org.postgresql:postgresql'
 
-    // SQL 생성 도구(SqlGenService)에서 등록 가능한 DB 종류 확장용 드라이버.
-    // MariaDB는 MySQL과도 호환되는 드라이버라 mysql:// URL도 대부분 그대로 접속된다.
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client:3.3.3'
     runtimeOnly 'com.oracle.database.jdbc:ojdbc8:21.9.0.0'
 
-    // Testcontainers: 하이브리드 lexical 검색(pg_trgm word_similarity) 실 DB 통합 테스트용.
-    // Docker 미가용 환경에서는 @Testcontainers(disabledWithoutDocker=true)로 자동 skip.
     testImplementation 'org.testcontainers:postgresql'
     testImplementation 'org.testcontainers:junit-jupiter'
 
-    // Spring Boot Web
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation 'org.springframework.boot:spring-boot-starter-web'
 
-    // Spring Boot WebFlux for Reactive Streaming
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
-    // Spring Boot Data JPA
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
-    // eGovFrame Runtime
     implementation('org.egovframe.rte:egovframe-rte-ptl-mvc') {
         exclude group: 'org.apache.commons', module: 'commons-lang3'
     }
 
-    // Apache Commons
     implementation 'commons-codec:commons-codec'
 
-    // CSV 문서 파싱 (따옴표/내부 콤마 등 RFC 4180 처리)
     implementation 'org.apache.commons:commons-csv:1.11.0'
 
-    // HWP 문서 파싱 (공공 행정문서 지원)
     implementation 'kr.dogfoot:hwplib:1.1.9'
-    // HWPX 문서 파싱
+
     implementation 'kr.dogfoot:hwpxlib:1.0.5'
 
-    // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testCompileOnly 'org.projectlombok:lombok'

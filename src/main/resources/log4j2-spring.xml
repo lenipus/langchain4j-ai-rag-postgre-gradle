@@ -37,6 +37,7 @@
         <SpringProfile name="default | local">
             <Root level="INFO">
                 <AppenderRef ref="Console" />
+                <AppenderRef ref="RollingFile" />
             </Root>
         </SpringProfile>
 

@@ -73,37 +73,31 @@
             </exclusions>
         </dependency>
 
-        <!-- LangChain4j Core -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j</artifactId>
         </dependency>
 
-        <!-- LangChain4j Ollama Integration -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-ollama</artifactId>
         </dependency>
 
-        <!-- LangChain4j PGVector Store -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-pgvector</artifactId>
         </dependency>
 
-        <!-- LangChain4j ONNX Embeddings -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-embeddings</artifactId>
         </dependency>
 
-        <!-- LangChain4j Document Parsers -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-document-parser-apache-pdfbox</artifactId>
         </dependency>
 
-        <!-- eGovFrame Excel (POI OOXML 전이 의존성 — DOCX 파싱) -->
         <dependency>
             <groupId>org.egovframe.rte</groupId>
             <artifactId>egovframe-rte-fdl-excel</artifactId>
@@ -115,13 +109,11 @@
             </exclusions>
         </dependency>
 
-        <!-- LangChain4j Reactor (Flux 스트리밍 지원) -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-reactor</artifactId>
         </dependency>
 
-        <!-- H2 Database (인메모리 H2, MODE=PostgreSQL로 PostgreSQL 호환 모드) -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
@@ -135,8 +127,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- SQL 생성 도구(com.example.sqlgen)에서 등록 가능한 DB 종류 확장용 드라이버.
-             MariaDB는 MySQL과도 호환되는 드라이버라 mysql:// URL도 대부분 그대로 접속된다. -->
         <dependency>
             <groupId>org.mariadb.jdbc</groupId>
             <artifactId>mariadb-java-client</artifactId>
@@ -150,8 +140,6 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Testcontainers: 하이브리드 lexical 검색(pg_trgm word_similarity) 실 DB 통합 테스트용.
-             Docker 미가용 환경에서는 @Testcontainers(disabledWithoutDocker=true)로 자동 skip. -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
@@ -163,7 +151,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Spring Boot Web -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
@@ -185,15 +172,12 @@
 			</exclusions>
 		</dependency>
 
-        <!-- 외장 톰캣에 서블릿 컨테이너를 맡기므로 provided 스코프로 전환.
-             (WAR 안에는 포함되지 않고, 컴파일/로컬 실행(mvn tomcat:run 등)에만 사용) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-tomcat</artifactId>
             <scope>provided</scope>
         </dependency>
 
-        <!-- Spring Boot WebFlux for Reactive Streaming -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
@@ -205,7 +189,6 @@
             </exclusions>
         </dependency>
 
-        <!-- Spring Boot Data JPA -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -217,7 +200,6 @@
             </exclusions>
         </dependency>
 
-        <!-- eGovFrame Runtime -->
         <dependency>
 			<groupId>org.egovframe.rte</groupId>
 			<artifactId>egovframe-rte-ptl-mvc</artifactId>
@@ -229,32 +211,29 @@
 			</exclusions>
 		</dependency>
 
-        <!-- Apache Commons -->
         <dependency>
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
         </dependency>
-        <!-- HWP 문서 파싱 (공공 행정문서 지원) -->
+
         <dependency>
             <groupId>kr.dogfoot</groupId>
             <artifactId>hwplib</artifactId>
             <version>1.1.9</version>
         </dependency>
-        <!-- HWPX 문서 파싱 -->
+
         <dependency>
             <groupId>kr.dogfoot</groupId>
             <artifactId>hwpxlib</artifactId>
             <version>1.0.5</version>
         </dependency>
 
-        <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
 
-        <!-- Test Dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
