@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LangChain4j RAG 채팅</title>
+    <title th:text="'[' + ${activeProfile} + '] LangChain4j RAG 채팅'">LangChain4j RAG 채팅</title>
     <script src="/js/marked.min.js"></script>
     <script src="/js/purify.min.js"></script>
     <link rel="stylesheet" href="/css/chat.css?v=2">
@@ -72,7 +72,7 @@
                     <h2 style="font-size:14px; margin:0;">테이블 선택 <span id="selected-tables-count" class="selected-tables-count"></span></h2>
                     <div class="section-header-actions">
                         <button class="btn btn-small" id="toggle-table-picker-btn" onclick="openTablePickerModal()" disabled>+ 추가</button>
-                        <button class="btn btn-small btn-danger" id="delete-selected-tables-btn" onclick="deleteSelectedTables()" disabled>Clear</button>
+                        <button class="btn btn-small btn-danger" id="delete-selected-tables-btn" onclick="deleteSelectedTables()" disabled>선택삭제</button>
                     </div>
                 </div>
                 <div id="selected-tables" class="selected-tables" style="margin-top:8px;">
@@ -176,7 +176,7 @@
         <div class="tabs">
             <div class="tab active" id="rag-tab" onclick="switchTab('rag')">RAG 채팅</div>
             <div class="tab" id="simple-tab" onclick="switchTab('simple')">일반 채팅</div>
-            <div class="tab" id="sqlgen-tab" onclick="switchTab('sqlgen')">SQL 생성</div>
+            <div class="tab" id="sqlgen-tab" th:if="${sqlgenEnabled}" onclick="switchTab('sqlgen')">SQL 생성</div>
         </div>
 
         <div class="chat-container" id="chat-container">
@@ -195,7 +195,7 @@
 
         <div class="input-container">
             <textarea class="message-input" id="message-input" rows="1" placeholder="메시지를 입력하세요..." onkeydown="handleKeyPress(event)" oninput="autoGrowMessageInput(event)"></textarea>
-            <button class="send-button" id="send-btn" onclick="sendMessage()">전송</button>
+            <button class="send-button" id="send-btn" onclick="handleSendButtonClick()">전송</button>
         </div>
     </div>
 
@@ -207,6 +207,11 @@
         const ALLOWED_EXTENSIONS = ALLOWED_EXTENSIONS_CSV.split(',');
 
         let currentMode = 'rag'; // 'rag', 'simple' 또는 'sqlgen'
+        // 현재 스트리밍 중인 응답의 중지 컨트롤러. null이면 idle 상태(전송 가능),
+        // 값이 있으면 스트리밍 중(전송 버튼이 "중지"로 바뀌고 클릭하면 이 stop()을 호출).
+        // Enter 키가 버튼의 disabled 상태와 무관하게 sendMessage()를 직접 호출하는 바람에
+        // 응답이 끝나기 전에 새 질문을 또 보낼 수 있었던 버그를 이걸로 막는다.
+        let activeStreamController = null;
         let statusCheckInterval = null;
         let availableModels = []; // 사용 가능한 모델 목록
         let selectedModel = ''; // 선택된 모델
@@ -631,7 +636,11 @@
             currentMode = mode;
             document.getElementById('rag-tab').classList.remove('active');
             document.getElementById('simple-tab').classList.remove('active');
-            document.getElementById('sqlgen-tab').classList.remove('active');
+            // sqlgen.enabled=false면 th:if로 이 탭 자체가 DOM에 없다.
+            const sqlgenTab = document.getElementById('sqlgen-tab');
+            if (sqlgenTab) {
+                sqlgenTab.classList.remove('active');
+            }
             document.getElementById(mode + '-tab').classList.add('active');
 
             // SQL 생성 모드일 때만 DB연결/테이블 선택 패널을 보여주고, 그 외엔 문서 관리 패널을 보여준다.
@@ -801,7 +810,25 @@
             }, 1000);
         }
 
+        // 전송 버튼 하나가 상태에 따라 "전송"/"중지" 두 가지 역할을 겸한다 - 스트리밍
+        // 중이면 지금 응답을 끊고, 아니면 평소처럼 새 질문을 보낸다.
+        function handleSendButtonClick() {
+            if (activeStreamController) {
+                activeStreamController.stop();
+            } else {
+                sendMessage();
+            }
+        }
+
         function sendMessage() {
+            // 응답이 아직 스트리밍 중이면(전송 버튼이 "중지"로 바뀐 상태) 새 질문을 못 보낸다.
+            // 버튼 클릭은 handleSendButtonClick()이 위에서 걸러주지만, Enter 키는 버튼 상태와
+            // 무관하게 이 함수를 직접 호출하므로 여기서도 확인해야 두 응답이 동시에 찍히는 걸
+            // 막을 수 있다.
+            if (activeStreamController) {
+                return;
+            }
+
             const input = document.getElementById('message-input');
             const message = input.value.trim();
             const sendBtn = document.getElementById('send-btn');
@@ -863,7 +890,12 @@
         // 스트리밍을 시작한다 - aiMessageDiv를 새로 만들지 않고 재사용해 같은 자리에서
         // 다시 응답을 받는다.
         function streamAiResponse(requestParams, aiMessageDiv, sendBtn) {
-            sendBtn.disabled = true;
+            // 버튼을 비활성화하지 않고 "중지"로 바꾼다 - 새 질문 전송은 activeStreamController
+            // 체크로 막되, 버튼 자체는 눌러서 지금 응답을 중간에 끊을 수 있게 살려둔다.
+            sendBtn.disabled = false;
+            sendBtn.textContent = '⏹';
+            sendBtn.classList.add('stop-mode');
+            sendBtn.title = '응답 중지';
             aiMessageDiv.innerHTML = '';
 
             // 로딩 표시 (첫 토큰이 올 때까지 진행 중임을 알려주는 애니메이션)
@@ -900,6 +932,38 @@
             const eventSource = new EventSource(`${endpoint}?${params.toString()}`);
             let fullResponse = '';
 
+            // 스트리밍이 끝났을 때(정상 완료/오류/사용자가 중지 버튼 클릭) 공통으로 되돌릴 상태.
+            function finishStreaming() {
+                activeStreamController = null;
+                sendBtn.textContent = '전송';
+                sendBtn.classList.remove('stop-mode');
+                sendBtn.removeAttribute('title');
+                sendBtn.disabled = false;
+            }
+
+            // 전송 버튼이 "중지"로 바뀐 동안 눌리면 이걸 호출한다 - 진행 중인 응답을 중간에
+            // 끊는다. 지금까지 받은 부분 응답은 그대로 남겨두고(재생성하지 않음), 정상 완료와
+            // 동일하게 코드블록 버튼을 붙이고 세션 목록을 새로고침한다.
+            activeStreamController = {
+                stop: function () {
+                    if (thinkingIntervalId) {
+                        clearInterval(thinkingIntervalId);
+                        thinkingIntervalId = null;
+                    }
+                    eventSource.close();
+                    finishStreaming();
+                    if (fullResponse) {
+                        enhanceCodeBlocks(aiMessageDiv);
+                    } else {
+                        // 토큰이 하나도 안 온 상태(아직 "생각 중" 표시)에서 중지하면, 그
+                        // 표시가 멈춘 채로 얼어붙어 마치 걸린 것처럼 보인다 - 중단됐다는
+                        // 걸 명확히 표시한다.
+                        aiMessageDiv.innerHTML = '<span style="color:#999; font-style:italic;">(응답 생성이 중단되었습니다)</span>';
+                    }
+                    refreshSessionsList();
+                }
+            };
+
             // 메시지 수신 시 처리
             let tokenCount = 0;
             eventSource.onmessage = function(event) {
@@ -908,6 +972,13 @@
                     clearInterval(thinkingIntervalId);
                     thinkingIntervalId = null;
                 }
+
+                // 내용을 갱신하기 전에 "이미 맨 아래까지 내려와 있었는지"를 먼저 확인해둔다.
+                // 맨 아래에 있었다면(사용자가 답변을 따라 보고 있는 중) 계속 따라 내려가고,
+                // 위로 스크롤해 다른 내용을 보고 있었다면 그 자리를 그대로 유지한다.
+                const chatContainerEl2 = document.getElementById('chat-container');
+                const wasAtBottom = chatContainerEl2.scrollHeight - chatContainerEl2.scrollTop - chatContainerEl2.clientHeight < 30;
+
                 try {
                     // JSON 파싱하여 토큰 추출
                     const data = JSON.parse(event.data);
@@ -954,13 +1025,22 @@
                     console.error('응답 처리 중 오류:', error);
                 }
 
-                // 스크롤 최하단으로 이동
-                const chatContainer = document.getElementById('chat-container');
-                chatContainer.scrollTop = chatContainer.scrollHeight;
+                // 맨 아래에 있었을 때만 새 내용을 따라 계속 맨 아래로 내린다. 위로 스크롤해
+                // 다른 내용을 보고 있었다면(= wasAtBottom이 false) 그 위치를 그대로 둔다.
+                if (wasAtBottom) {
+                    chatContainerEl2.scrollTop = chatContainerEl2.scrollHeight;
+                }
             };
 
             // 오류 발생 시 처리
             eventSource.onerror = function(error) {
+                // 사용자가 이미 "중지"를 눌러 activeStreamController.stop()에서 정리한 뒤라면,
+                // eventSource.close()로 인해 뒤늦게 오는 이 이벤트는 무시한다(안 그러면
+                // 사용자가 중지한 걸 오류로 착각해 "재시도" 버튼을 보여주게 된다).
+                if (!activeStreamController) {
+                    return;
+                }
+
                 console.error('EventSource 상태:', eventSource.readyState);
                 console.error('요청 URL:', eventSource.url);
 
@@ -970,9 +1050,7 @@
                 }
 
                 eventSource.close();
-
-                // 버튼 활성화
-                sendBtn.disabled = false;
+                finishStreaming();
 
                 // 응답을 하나도 못 받은 경우(연결 문제 등) - 같은 질의를 다시 보낼 수 있는
                 // 재시도 버튼을 보여준다. 부분 응답이라도 받은 경우는 그 응답을 그대로 두고
@@ -987,15 +1065,18 @@
 
             // 스트림 완료 시 처리
             eventSource.addEventListener('complete', function() {
+                // 이미 사용자가 중지해서 정리된 뒤라면 중복 처리하지 않는다.
+                if (!activeStreamController) {
+                    return;
+                }
+
                 if (thinkingIntervalId) {
                     clearInterval(thinkingIntervalId);
                     thinkingIntervalId = null;
                 }
 
                 eventSource.close();
-
-                // 버튼 활성화
-                sendBtn.disabled = false;
+                finishStreaming();
 
                 enhanceCodeBlocks(aiMessageDiv);
 

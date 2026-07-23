@@ -5,15 +5,12 @@ spring:
   application:
     name: langchain4j-ai-rag-postgre
 
-  # .env(프로젝트 루트, git에는 안 올라감 - .gitignore 참고)에 있는 값을 환경변수처럼
-  # 읽어온다. DB 비밀번호/암호화 키 등 프로필과 무관하게 공통인 비밀값은 여기에 둔다.
-  # optional:이라 파일이 없어도(예: CI, 이미 실제 OS 환경변수로 주입하는 배포 환경) 에러 없이 넘어간다.
+  # .env(프로젝트 루트, git에는 안 올라감 - .gitignore 참고)에 있는 값을 환경변수처럼 읽어온다.
   config:
     import: optional:file:.env[.properties]
 
-  # 채팅 서버(langchain4j.ollama.*)/RAG 튜닝처럼 환경마다 값이 다른 설정은
-  # application-{profile}.yml로 분리했다. SPRING_PROFILES_ACTIVE 환경변수로 전환하며,
-  # 안 정하면 기본으로 "local" 프로파일(application-local.yml)이 적용된다.
+  # 채팅 서버(langchain4j.ollama.*)/RAG 튜닝처럼 환경마다 값이 다른 설정은 application-{profile}.yml로 분리했다.
+  # SPRING_PROFILES_ACTIVE 환경변수로 전환
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
 
@@ -148,9 +145,6 @@ rag:
   retrieval-log:
     delete-with-session: true
 
-# RAG 설정, LangChain4j Ollama(채팅 서버) 설정은 environment마다 값이 달라 각각의
-# application-{profile}.yml(application-local.yml, application-remote.yml 등)로 옮겼다.
-
 # 채팅 메모리 설정
 chat:
   memory:
@@ -163,6 +157,7 @@ session:
 
 # SQL 생성 도구(com.example.sqlgen) 설정
 sqlgen:
+  enabled: ${SQLGEN_FEATURE_ENABLED:false}
   encryption:
     secret-key: ${SQLGEN_ENCRYPTION_KEY:}
 

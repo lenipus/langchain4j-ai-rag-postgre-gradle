@@ -11,6 +11,7 @@ import com.example.sqlgen.service.SqlGenService;
 import com.example.sqlgen.util.SqlGenPasswordEncryptor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "sqlgen", name = "enabled", havingValue = "true", matchIfMissing = false)
 public class SqlGenServiceImpl implements SqlGenService {
 
     /** getTables()/getColumns() 조회 시 노이즈만 되는 시스템 스키마 제외 (Postgres 기준). */

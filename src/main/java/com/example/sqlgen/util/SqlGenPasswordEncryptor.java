@@ -1,6 +1,7 @@
 package com.example.sqlgen.util;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Cipher;
@@ -19,8 +20,13 @@ import java.util.Base64;
  * ({@code SQLGEN_ENCRYPTION_KEY})로 별도 값을 넣어야 한다. 이 키가 바뀌면 이미
  * 저장된 연결들의 비밀번호는 복호화할 수 없게 되므로(재등록 필요), 키를 잃어버리지
  * 않도록 별도 보관이 필요하다.</p>
+ *
+ * <p>{@code sqlgen.enabled=false}면 SQL 생성 기능 자체를 안 쓴다는 뜻이므로, 이 빈도
+ * 만들지 않는다 - 그래야 이 기능을 안 쓰는 환경에서 {@code SQLGEN_ENCRYPTION_KEY}를
+ * 설정하지 않아도(빈 키 때문에) 애플리케이션 구동이 실패하지 않는다.</p>
  */
 @Component
+@ConditionalOnProperty(prefix = "sqlgen", name = "enabled", havingValue = "true", matchIfMissing = false)
 public class SqlGenPasswordEncryptor {
 
     private static final String ALGORITHM = "AES/GCM/NoPadding";

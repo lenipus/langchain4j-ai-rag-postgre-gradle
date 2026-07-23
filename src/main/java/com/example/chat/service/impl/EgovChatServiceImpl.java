@@ -10,12 +10,15 @@ import com.example.sqlgen.service.SqlGenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -31,7 +34,11 @@ import java.util.regex.Pattern;
 public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements EgovChatService {
 
     private final ChatbotFactory chatbotFactory;
-    private final SqlGenService sqlGenService;
+
+    // sqlgen.enabled=false면 SqlGenServiceImpl 빈 자체가 안 만들어지므로(SqlGenPasswordEncryptor의
+    // 암호화 키 미설정 때문에 앱 구동이 실패하지 않도록), Optional로 받아 없으면 SQL 생성
+    // 요청 시 안내 메시지로 처리한다 (streamSqlGenResponse 참고).
+    private final Optional<SqlGenService> sqlGenService;
 
     /**
      * 세션별 RAG 기반 스트리밍 응답 생성
@@ -52,19 +59,21 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
             AtomicLong answerLength = new AtomicLong(0);
 
             // RAG 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
-            RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId);
-            return ragChatbot.streamChat(query)
-                    .doOnNext(chunk -> {
-                        answerLength.addAndGet(chunk.length());
-                        if (firstChunkReceived.compareAndSet(false, true)) {
-                            log.info("RAG 답변 수신 시작 - 세션: {}, 소요: {}ms",
-                                    sessionId, System.currentTimeMillis() - startTime);
-                        }
-                    })
-                    .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
-                            sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
-                    .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
-                    .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+            return withMemoryConflictRetry(() -> {
+                RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId);
+                return ragChatbot.streamChat(query)
+                        .doOnNext(chunk -> {
+                            answerLength.addAndGet(chunk.length());
+                            if (firstChunkReceived.compareAndSet(false, true)) {
+                                log.info("RAG 답변 수신 시작 - 세션: {}, 소요: {}ms",
+                                        sessionId, System.currentTimeMillis() - startTime);
+                            }
+                        })
+                        .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                                sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
+                        .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
+                        .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+            }, sessionId);
 
         } catch (Exception e) {
             // 질의 압축(CompressingQueryTransformer) 등은 스트림이 만들어지기 전에 동기적으로
@@ -93,19 +102,21 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
             AtomicLong answerLength = new AtomicLong(0);
 
             // Simple 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
-            SimpleChatbot simpleChatbot = chatbotFactory.createSimpleChatbot(model, sessionId);
-            return simpleChatbot.streamChat(query)
-                    .doOnNext(chunk -> {
-                        answerLength.addAndGet(chunk.length());
-                        if (firstChunkReceived.compareAndSet(false, true)) {
-                            log.info("Simple 답변 수신 시작 - 세션: {}, 소요: {}ms",
-                                    sessionId, System.currentTimeMillis() - startTime);
-                        }
-                    })
-                    .doOnComplete(() -> log.info("Simple 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
-                            sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
-                    .doOnError(e -> log.error("Simple 스트리밍 오류 - 세션: {}", sessionId, e))
-                    .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+            return withMemoryConflictRetry(() -> {
+                SimpleChatbot simpleChatbot = chatbotFactory.createSimpleChatbot(model, sessionId);
+                return simpleChatbot.streamChat(query)
+                        .doOnNext(chunk -> {
+                            answerLength.addAndGet(chunk.length());
+                            if (firstChunkReceived.compareAndSet(false, true)) {
+                                log.info("Simple 답변 수신 시작 - 세션: {}, 소요: {}ms",
+                                        sessionId, System.currentTimeMillis() - startTime);
+                            }
+                        })
+                        .doOnComplete(() -> log.info("Simple 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                                sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
+                        .doOnError(e -> log.error("Simple 스트리밍 오류 - 세션: {}", sessionId, e))
+                        .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+            }, sessionId);
 
         } catch (Exception e) {
             log.error("Simple 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
@@ -128,27 +139,34 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                 sessionId, model, connectionId, tableNames, query);
 
         try {
+            if (sqlGenService.isEmpty()) {
+                log.warn("SQL 생성 요청을 받았지만 sqlgen.enabled=false로 비활성화되어 있음 - 세션: {}", sessionId);
+                return Flux.just("\n[오류: SQL 생성 기능이 비활성화되어 있습니다. 관리자에게 문의해주세요.]");
+            }
+
             validateSessionId(sessionId);
 
             AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
             AtomicLong answerLength = new AtomicLong(0);
 
-            String schemaContext = sqlGenService.buildSchemaContext(connectionId, tableNames);
+            String schemaContext = sqlGenService.get().buildSchemaContext(connectionId, tableNames);
             String augmentedQuery = query + SqlGenChatbot.SCHEMA_CONTEXT_MARKER + schemaContext;
 
-            SqlGenChatbot sqlGenChatbot = chatbotFactory.createSqlGenChatbot(model, sessionId);
-            return sqlGenChatbot.streamChat(augmentedQuery)
-                    .doOnNext(chunk -> {
-                        answerLength.addAndGet(chunk.length());
-                        if (firstChunkReceived.compareAndSet(false, true)) {
-                            log.info("SQL 생성 답변 수신 시작 - 세션: {}, 소요: {}ms",
-                                    sessionId, System.currentTimeMillis() - startTime);
-                        }
-                    })
-                    .doOnComplete(() -> log.info("SQL 생성 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
-                            sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
-                    .doOnError(e -> log.error("SQL 생성 스트리밍 오류 - 세션: {}", sessionId, e))
-                    .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+            return withMemoryConflictRetry(() -> {
+                SqlGenChatbot sqlGenChatbot = chatbotFactory.createSqlGenChatbot(model, sessionId);
+                return sqlGenChatbot.streamChat(augmentedQuery)
+                        .doOnNext(chunk -> {
+                            answerLength.addAndGet(chunk.length());
+                            if (firstChunkReceived.compareAndSet(false, true)) {
+                                log.info("SQL 생성 답변 수신 시작 - 세션: {}, 소요: {}ms",
+                                        sessionId, System.currentTimeMillis() - startTime);
+                            }
+                        })
+                        .doOnComplete(() -> log.info("SQL 생성 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                                sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
+                        .doOnError(e -> log.error("SQL 생성 스트리밍 오류 - 세션: {}", sessionId, e))
+                        .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+            }, sessionId);
 
         } catch (Exception e) {
             log.error("SQL 생성 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
@@ -206,6 +224,44 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         return friendlyErrorMessage(e);
     }
 
+    /** "중지" 직후 곧바로 재질문했을 때의 채팅 메모리 저장 충돌 재시도 최대 횟수. */
+    private static final int MEMORY_CONFLICT_MAX_RETRIES = 2;
+    private static final long MEMORY_CONFLICT_RETRY_DELAY_MS = 300;
+
+    /**
+     * 응답을 "중지"한 직후 바로 새 질문을 보내면, 방금 중단된 스트림이 서버 쪽에서 아직
+     * 마무리 중이던 채팅 메모리 저장(PersistentChatMemoryStore.updateMessages - 세션 전체
+     * 메시지를 delete 후 재삽입)과 새 질문의 메모리 저장이 같은 세션 행을 동시에 건드려
+     * ObjectOptimisticLockingFailureException이 날 수 있다(이전 스트림은 클라이언트가
+     * EventSource.close()로 연결만 끊었을 뿐, 서버의 LLM 호출/메모리 저장 자체는 별도
+     * 스레드에서 계속 진행 중이었기 때문). 대부분 수백ms 안에 끝나는 일시적 경합이므로,
+     * 채팅 자체를 실패로 보여주는 대신 짧게 재시도한다.
+     *
+     * <p>이 충돌은 매 요청 시작 시 동기적으로(스트림을 만들기도 전에) 발생하므로, 스트림에
+     * 이미 흘려보낸 토큰을 되돌릴 필요 없이 챗봇 생성 + streamChat() 호출 자체를 다시
+     * 시도하면 된다.</p>
+     */
+    Flux<String> withMemoryConflictRetry(Supplier<Flux<String>> streamSupplier, String sessionId) {
+        int attempt = 0;
+        while (true) {
+            try {
+                return streamSupplier.get();
+            } catch (ObjectOptimisticLockingFailureException e) {
+                attempt++;
+                if (attempt > MEMORY_CONFLICT_MAX_RETRIES) {
+                    throw e;
+                }
+                log.warn("채팅 메모리 동시 갱신 충돌 감지 - {}번째 재시도, 세션: {}", attempt, sessionId);
+                try {
+                    Thread.sleep(MEMORY_CONFLICT_RETRY_DELAY_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
     // Ollama 원본 오류 본문이 langchain4j 예외 메시지 안에 JSON-in-JSON으로 한 번 더 감싸여
     // 오므로, 실제 메시지에는 큰따옴표 앞에 이스케이프 백슬래시(\")가 그대로 문자로 남아있다
     // (예: ...\"n_prompt_tokens\":13018...). 그래서 따옴표 앞의 백슬래시는 있어도 없어도
@@ -226,6 +282,10 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      */
     // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
     String friendlyErrorMessage(Throwable e) {
+        if (e instanceof ObjectOptimisticLockingFailureException) {
+            return "죄송합니다. 방금 응답을 중지한 직후라 이전 요청 정리와 충돌했습니다. 잠시 후 다시 시도해주세요.";
+        }
+
         String contextSizeMessage = findContextSizeExceededMessage(e);
         if (contextSizeMessage != null) {
             return contextSizeMessage;

@@ -102,7 +102,7 @@ h1 {
     background-color: #f9f9f9;
 }
 .message {
-    margin-bottom: 8px;
+    margin-bottom: 20px;
     padding: 6px 12px;
     border-radius: 5px;
     max-width: 80%;
@@ -114,7 +114,11 @@ h1 {
 .user-message {
     background-color: #dcf8c6;
     margin-left: auto;
-    text-align: right;
+    text-align: left;
+    /* .message의 max-width: 80%는 상한일 뿐, 블록 요소라 기본은 그 상한까지 항상
+       꽉 채워졌었다 - width: fit-content로 실제 글자 길이만큼만 차지하게 한다. */
+    width: fit-content;
+    padding: 12px 16px;
 }
 .ai-message {
     background-color: #f0f0f0;
@@ -279,6 +283,16 @@ h1 {
 .send-button:disabled {
     background-color: #cccccc;
     cursor: not-allowed;
+}
+/* 응답 스트리밍 중에는 전송 버튼이 중지 버튼을 겸한다 - "중지" 글자 대신 작은
+   정지 기호(⏹)로 표시해 눈에 덜 띄면서도 역할이 바뀐 걸 알아볼 수 있게 한다. */
+.send-button.stop-mode {
+    background-color: #e74c3c;
+    font-size: 14px;
+    padding: 10px 16px;
+}
+.send-button.stop-mode:hover {
+    background-color: #c0392b;
 }
 .loading {
     text-align: center;

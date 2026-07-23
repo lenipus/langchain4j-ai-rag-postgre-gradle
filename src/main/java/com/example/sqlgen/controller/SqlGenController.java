@@ -7,6 +7,7 @@ import com.example.sqlgen.dto.TestConnectionRequest;
 import com.example.sqlgen.service.SqlGenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +18,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/sqlgen")
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "sqlgen", name = "enabled", havingValue = "true", matchIfMissing = false)
 public class SqlGenController {
 
     private final SqlGenService sqlGenService;

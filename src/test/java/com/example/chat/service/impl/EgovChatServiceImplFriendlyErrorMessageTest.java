@@ -2,6 +2,7 @@ package com.example.chat.service.impl;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -18,7 +19,7 @@ class EgovChatServiceImplFriendlyErrorMessageTest {
 
     private final EgovChatServiceImpl service =
             new EgovChatServiceImpl(mock(com.example.chat.service.ChatbotFactory.class),
-                    mock(com.example.sqlgen.service.SqlGenService.class));
+                    java.util.Optional.of(mock(com.example.sqlgen.service.SqlGenService.class)));
 
     @Test
     @DisplayName("컨텍스트 크기 초과 오류는 실제 토큰 수(n_prompt_tokens/n_ctx)를 포함한 메시지로 바뀐다")
@@ -66,5 +67,16 @@ class EgovChatServiceImplFriendlyErrorMessageTest {
         String message = service.friendlyErrorMessage(exception);
 
         assertThat(message).contains("boom");
+    }
+
+    @Test
+    @DisplayName("채팅 메모리 낙관적 잠금 충돌(재시도 소진)은 원인을 알 수 있는 한국어 메시지로 바뀐다")
+    void translatesExhaustedMemoryConflictRetryToFriendlyMessage() {
+        Exception exception = new ObjectOptimisticLockingFailureException("ChatMemoryEntity", 4240L);
+
+        String message = service.friendlyErrorMessage(exception);
+
+        assertThat(message).contains("중지").contains("충돌");
+        assertThat(message).doesNotContain("ObjectOptimisticLockingFailureException");
     }
 }
