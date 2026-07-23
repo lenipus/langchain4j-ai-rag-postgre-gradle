@@ -19,9 +19,9 @@ class SqlGenServiceImplTest {
     @Test
     @DisplayName("대상 DBMS/테이블명/컬럼(타입, PK, NULLABLE 여부)이 모두 텍스트에 들어간다")
     void formatsSchemaBlockWithTableAndColumnInfo() {
-        TableSchemaDto schema = new TableSchemaDto("public.users", List.of(
-                new TableColumnDto("id", "bigint", false, true),
-                new TableColumnDto("name", "varchar", true, false)));
+        TableSchemaDto schema = new TableSchemaDto("public.users", null, List.of(
+                new TableColumnDto("id", "bigint", false, true, null),
+                new TableColumnDto("name", "varchar", true, false, null)));
 
         String block = service.formatSchemaBlock(List.of(schema), "MariaDB");
 
@@ -29,6 +29,21 @@ class SqlGenServiceImplTest {
         assertThat(block).contains("public.users");
         assertThat(block).contains("id (bigint, PK, NOT NULL)");
         assertThat(block).contains("name (varchar, NULL 허용)");
+    }
+
+    @Test
+    @DisplayName("테이블/컬럼 코멘트가 있으면 함께 표시된다 (영문 이름만으로는 의미가 불분명해서 LLM에 같이 전달)")
+    void formatsSchemaBlockWithComments() {
+        TableSchemaDto schema = new TableSchemaDto("public.users", "회원 정보", List.of(
+                new TableColumnDto("id", "bigint", false, true, "회원 번호"),
+                new TableColumnDto("name", "varchar", true, false, null)));
+
+        String block = service.formatSchemaBlock(List.of(schema), "MariaDB");
+
+        assertThat(block).contains("[테이블: public.users - 회원 정보]");
+        assertThat(block).contains("id (bigint, PK, NOT NULL) - 회원 번호");
+        // 코멘트가 없는 컬럼은 " - " 접미사 없이 그대로 끝난다 (마지막 줄이라 stripTrailing으로 개행은 제거됨)
+        assertThat(block).endsWith("name (varchar, NULL 허용)");
     }
 
     @Test

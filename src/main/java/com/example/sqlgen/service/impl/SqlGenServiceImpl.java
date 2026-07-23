@@ -74,9 +74,8 @@ public class SqlGenServiceImpl implements SqlGenService {
         try (Connection conn = openConnectionFor(connectionInfo)) {
             DatabaseMetaData metaData = conn.getMetaData();
             List<TableInfoDto> tables = new ArrayList<>();
-            // REMARKS(테이블 코멘트)는 JDBC 드라이버/DBMS에 따라 지원 여부가 달라서
-            // 안 나오면 null로 둔다 - 화면에서 없으면 그냥 이름만 보여준다.
-            try (ResultSet rs = metaData.getTables(null, null, "%", new String[]{"TABLE", "VIEW"})) {
+
+            try (ResultSet rs = metaData.getTables(conn.getCatalog(), null, "%", new String[]{"TABLE", "VIEW"})) {
                 while (rs.next()) {
                     String schema = rs.getString("TABLE_SCHEM");
                     String table = rs.getString("TABLE_NAME");
@@ -163,41 +162,44 @@ public class SqlGenServiceImpl implements SqlGenService {
     private TableSchemaDto fetchTableSchema(Connection conn, String schema, String table, String displayName) throws SQLException {
         DatabaseMetaData metaData = conn.getMetaData();
 
+        String catalog = conn.getCatalog();
+
         Set<String> primaryKeyColumns = new HashSet<>();
-        try (ResultSet rs = metaData.getPrimaryKeys(null, schema, table)) {
+        try (ResultSet rs = metaData.getPrimaryKeys(catalog, schema, table)) {
             while (rs.next()) {
                 primaryKeyColumns.add(rs.getString("COLUMN_NAME"));
             }
         }
 
+        String tableComment = null;
+        try (ResultSet rs = metaData.getTables(catalog, schema, table, new String[]{"TABLE", "VIEW"})) {
+            if (rs.next()) {
+                String remarks = rs.getString("REMARKS");
+                tableComment = (remarks != null && !remarks.isBlank()) ? remarks : null;
+            }
+        }
+
         List<TableColumnDto> columns = new ArrayList<>();
-        try (ResultSet rs = metaData.getColumns(null, schema, table, "%")) {
+        try (ResultSet rs = metaData.getColumns(catalog, schema, table, "%")) {
             while (rs.next()) {
                 String columnName = rs.getString("COLUMN_NAME");
+                String remarks = rs.getString("REMARKS");
                 columns.add(new TableColumnDto(
                         columnName,
                         rs.getString("TYPE_NAME"),
                         rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable,
-                        primaryKeyColumns.contains(columnName)));
+                        primaryKeyColumns.contains(columnName),
+                        (remarks != null && !remarks.isBlank()) ? remarks : null));
             }
         }
 
-        return new TableSchemaDto(displayName, columns);
+        return new TableSchemaDto(displayName, tableComment, columns);
     }
 
     /**
      * 대상 DBMS + 테이블 스키마를 텍스트로 만든다. 항상 같은 절차적 지시사항은
      * {@link SqlGenService#SQL_GEN_SYSTEM_PROMPT}(System 메시지)에 이미 들어있으므로 여기서
      * 반복하지 않는다.
-     *
-     * <p>대상 DBMS 이름을 명시적으로 알려준다 - 안 알려주면 모델이 어떤 DBMS인지 몰라서
-     * 엉뚱한 방언(예: MariaDB 연결인데 MSSQL 문법)으로 SQL을 만들어버리는 문제가 있었다.
-     * 이 값은 JDBC 연결의 {@code DatabaseMetaData.getDatabaseProductName()}에서 그대로
-     * 가져온 실제 값이라 등록된 연결이 어떤 DB인지와 항상 일치한다.</p>
-     *
-     * <p>실측 테스트 결과 영어/한글 간 SQL 결과물 차이는 없었고, 사용자가 한국어
-     * 사용자라 한글로 되돌림 (자세한 이유는 {@link SqlGenService#SQL_GEN_SYSTEM_PROMPT}
-     * 참고).</p>
      */
     String formatSchemaBlock(List<TableSchemaDto> schemas, String dbmsName) {
         StringBuilder sb = new StringBuilder();
@@ -205,13 +207,21 @@ public class SqlGenServiceImpl implements SqlGenService {
                 .append(" (다른 DBMS의 문법이나 함수를 섞어 쓰지 마세요).\n\n");
 
         for (TableSchemaDto schema : schemas) {
-            sb.append("[테이블: ").append(schema.tableName()).append("]\n");
+            sb.append("[테이블: ").append(schema.tableName());
+            if (schema.tableComment() != null) {
+                sb.append(" - ").append(schema.tableComment());
+            }
+            sb.append("]\n");
             for (TableColumnDto column : schema.columns()) {
                 sb.append("- ").append(column.name())
                         .append(" (").append(column.dataType())
                         .append(column.primaryKey() ? ", PK" : "")
                         .append(column.nullable() ? ", NULL 허용" : ", NOT NULL")
-                        .append(")\n");
+                        .append(")");
+                if (column.comment() != null) {
+                    sb.append(" - ").append(column.comment());
+                }
+                sb.append("\n");
             }
             sb.append("\n");
         }
