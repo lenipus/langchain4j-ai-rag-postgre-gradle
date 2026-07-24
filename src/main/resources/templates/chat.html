@@ -352,7 +352,45 @@
                 })
                 .catch(error => {
                     console.error('메시지 로드 실패:', error);
+                })
+                .finally(() => {
+                    // 이 세션에 지금 진행 중인 스트림이 있다면(다른 채팅 보다가 돌아온 경우),
+                    // 방금 지운 화면 위에 이어서 보이도록 다시 붙인다.
+                    reattachActiveStreamIfNeeded(sessionId);
                 });
+        }
+
+        /**
+         * 다른 채팅을 보는 사이 이 세션의 스트리밍이 계속 진행되고 있었다면, 방금 새로
+         * 그려진 화면(loadSessionMessages가 지우고 다시 채운 화면) 위에 진행 중인 답변을
+         * 이어서 보여준다. aiMessageDiv를 새로 만들어 activeStreamController에 다시
+         * 연결하면, 이후 onmessage/생각 중 인터벌이 자동으로 이 새 div를 갱신하게 된다.
+         */
+        function reattachActiveStreamIfNeeded(sessionId) {
+            if (!activeStreamController || activeStreamController.sessionId !== sessionId) {
+                return;
+            }
+
+            const chatContainer = document.getElementById('chat-container');
+            const newDiv = document.createElement('div');
+            newDiv.classList.add('message', 'ai-message');
+            chatContainer.appendChild(newDiv);
+            activeStreamController.aiMessageDiv = newDiv;
+
+            if (activeStreamController.thinking) {
+                renderThinkingIndicatorHtml(newDiv, '답변을 작성하고 있어요...');
+            } else if (activeStreamController.fullResponse) {
+                try {
+                    const html = DOMPurify.sanitize(marked.parse(activeStreamController.fullResponse,
+                            { breaks: true, gfm: true }));
+                    newDiv.innerHTML = html;
+                } catch (markdownError) {
+                    newDiv.style.whiteSpace = 'pre-wrap';
+                    newDiv.innerText = activeStreamController.fullResponse;
+                }
+            }
+
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
         /**
@@ -713,7 +751,9 @@
 
         // 버튼을 누르지 않고 사용자가 직접 맨 아래로 다시 스크롤해도 버튼을 치운다.
         document.getElementById('chat-container').addEventListener('scroll', function () {
-            if (!activeStreamController) {
+            // 스트림이 없거나, 있어도 지금 보고 있는 세션이 그 스트림의 세션과 다르면
+            // (다른 채팅을 보는 중) 이 화면의 스크롤과 점프 버튼은 그 스트림과 무관하다.
+            if (!activeStreamController || activeStreamController.sessionId !== currentSessionId) {
                 return;
             }
             const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 30;
@@ -834,14 +874,14 @@
             return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
         }
 
-        function startThinkingIndicator(container, mode) {
+        // container를 고정된 값으로 받지 않고 매 tick마다 activeStreamController.aiMessageDiv를
+        // 다시 읽는다 - 다른 채팅을 보다가 돌아오면(reattachActiveStreamIfNeeded) 이 div가
+        // 새로 만들어진 엘리먼트로 바뀌는데, 고정 참조로 캡처해두면 그 교체를 못 따라간다.
+        function startThinkingIndicator(mode) {
             const phrases = ['답변을 작성하고 있어요...', '조금만 더 기다려주세요...'];
             const startTime = Date.now();
 
-            container.innerHTML = '<div class="thinking-indicator">' +
-                '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
-                '<span class="thinking-text">' + phrases[0] + '</span>' +
-                '<span class="thinking-elapsed">(0s)</span></div>';
+            renderThinkingIndicatorHtml(activeStreamController.aiMessageDiv, phrases[0]);
 
             // 대기 단계에서 스크롤을 올려 "답변 작성 중 - 보러 가기" 버튼이 뜨면, 그동안은
             // 아직 아무 토큰도 안 왔으니 같은 문구 대신 경과 시간을 보여준다 - 실제로 답변이
@@ -852,10 +892,13 @@
             // 문구 순환(4초 간격)과 경과 시간 표시(1초 간격)를 인터벌 하나로 같이 처리한다
             // (별도 인터벌 두 개를 두면 정리할 때 둘 다 clearInterval 해줘야 해서 번거롭다).
             return setInterval(() => {
+                if (!activeStreamController) {
+                    return;
+                }
                 const elapsedMs = Date.now() - startTime;
                 const elapsedSeconds = Math.floor(elapsedMs / 1000);
 
-                if (activeStreamController && activeStreamController.thinking) {
+                if (activeStreamController.thinking) {
                     setJumpButtonLabel('답변을 기다리는 중 (' + formatElapsedTime(elapsedMs) + ') - 보러 가기');
                 }
 
@@ -863,6 +906,7 @@
                     index = (index + 1) % phrases.length;
                 }
 
+                const container = activeStreamController.aiMessageDiv;
                 const textEl = container.querySelector('.thinking-text');
                 if (textEl) {
                     textEl.textContent = phrases[index];
@@ -872,6 +916,13 @@
                     elapsedEl.textContent = '(' + formatElapsedTime(elapsedMs) + ')';
                 }
             }, 1000);
+        }
+
+        function renderThinkingIndicatorHtml(container, phraseText) {
+            container.innerHTML = '<div class="thinking-indicator">' +
+                '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
+                '<span class="thinking-text">' + phraseText + '</span>' +
+                '<span class="thinking-elapsed">(0s)</span></div>';
         }
 
         // 전송 버튼 하나가 상태에 따라 "전송"/"중지" 두 가지 역할을 겸한다 - 스트리밍
@@ -962,8 +1013,6 @@
             sendBtn.title = '응답 중지';
             aiMessageDiv.innerHTML = '';
 
-            // 로딩 표시 (첫 토큰이 올 때까지 진행 중임을 알려주는 애니메이션)
-            let thinkingIntervalId = startThinkingIndicator(aiMessageDiv, requestParams.mode);
             const chatContainerEl = document.getElementById('chat-container');
             chatContainerEl.scrollTop = chatContainerEl.scrollHeight;
             hideJumpToLatestButton();
@@ -995,7 +1044,6 @@
 
             // EventSource를 사용한 스트리밍 응답 처리
             const eventSource = new EventSource(`${endpoint}?${params.toString()}`);
-            let fullResponse = '';
 
             // 스트리밍이 끝났을 때(정상 완료/오류/사용자가 중지 버튼 클릭) 공통으로 되돌릴 상태.
             function finishStreaming() {
@@ -1007,50 +1055,66 @@
                 hideJumpToLatestButton();
             }
 
-            // 전송 버튼이 "중지"로 바뀐 동안 눌리면 이걸 호출한다 - 진행 중인 응답을 중간에
-            // 끊는다. 지금까지 받은 부분 응답은 그대로 남겨두고(재생성하지 않음), 정상 완료와
-            // 동일하게 코드블록 버튼을 붙이고 세션 목록을 새로고침한다.
+            // 이 스트림의 상태를 전부 activeStreamController에 둔다(클로저 변수로 안 두는 이유:
+            // 사용자가 다른 채팅을 봤다가 이 세션으로 돌아오면 aiMessageDiv가 새로 만들어진
+            // 엘리먼트로 교체되는데 - reattachActiveStreamIfNeeded() 참고 - 클로저에 고정
+            // 캡처해두면 그 교체를 반영할 방법이 없다. sessionId를 기억해두는 이유는, 지금
+            // 보고 있는 세션이 이 스트림의 세션과 같을 때만 스크롤을 건드리기 위해서다.
             activeStreamController = {
+                sessionId: requestParams.sessionId,
+                aiMessageDiv: aiMessageDiv,
+                fullResponse: '',
                 // 첫 토큰이 오기 전(대기 단계)인지 여부 - 점프 버튼 문구를 다르게 보여주는 데 쓴다.
                 thinking: true,
+                thinkingIntervalId: null,
                 stop: function () {
-                    if (thinkingIntervalId) {
-                        clearInterval(thinkingIntervalId);
-                        thinkingIntervalId = null;
+                    if (activeStreamController.thinkingIntervalId) {
+                        clearInterval(activeStreamController.thinkingIntervalId);
+                        activeStreamController.thinkingIntervalId = null;
                     }
                     eventSource.close();
+                    const hadResponse = !!activeStreamController.fullResponse;
+                    const targetDiv = activeStreamController.aiMessageDiv;
                     finishStreaming();
-                    if (fullResponse) {
-                        enhanceCodeBlocks(aiMessageDiv);
+                    if (hadResponse) {
+                        enhanceCodeBlocks(targetDiv);
                     } else {
                         // 토큰이 하나도 안 온 상태(아직 "생각 중" 표시)에서 중지하면, 그
                         // 표시가 멈춘 채로 얼어붙어 마치 걸린 것처럼 보인다 - 중단됐다는
                         // 걸 명확히 표시한다.
-                        aiMessageDiv.innerHTML = '<span style="color:#999; font-style:italic;">(응답 생성이 중단되었습니다)</span>';
+                        targetDiv.innerHTML = '<span style="color:#999; font-style:italic;">(응답 생성이 중단되었습니다)</span>';
                     }
                     refreshSessionsList();
                 }
             };
 
+            // 로딩 표시 (첫 토큰이 올 때까지 진행 중임을 알려주는 애니메이션)
+            activeStreamController.thinkingIntervalId = startThinkingIndicator(requestParams.mode);
+
             // 메시지 수신 시 처리
             let tokenCount = 0;
             eventSource.onmessage = function(event) {
-                // 첫 토큰이 도착하면 생각 중 표시를 멈춘다(이후 innerHTML이 실제 응답으로 덮어써짐)
-                if (thinkingIntervalId) {
-                    clearInterval(thinkingIntervalId);
-                    thinkingIntervalId = null;
-                    if (activeStreamController) {
-                        activeStreamController.thinking = false;
-                        // 점프 버튼이 대기 단계 문구(경과 시간 포함)로 떠 있었다면 즉시 갱신한다.
-                        setJumpButtonLabel('답변 작성 중 - 보러 가기');
-                    }
+                if (!activeStreamController) {
+                    return;
                 }
 
-                // 내용을 갱신하기 전에 "이미 맨 아래까지 내려와 있었는지"를 먼저 확인해둔다.
-                // 맨 아래에 있었다면(사용자가 답변을 따라 보고 있는 중) 계속 따라 내려가고,
-                // 위로 스크롤해 다른 내용을 보고 있었다면 그 자리를 그대로 유지한다.
+                // 첫 토큰이 도착하면 생각 중 표시를 멈춘다(이후 innerHTML이 실제 응답으로 덮어써짐)
+                if (activeStreamController.thinkingIntervalId) {
+                    clearInterval(activeStreamController.thinkingIntervalId);
+                    activeStreamController.thinkingIntervalId = null;
+                    activeStreamController.thinking = false;
+                    // 점프 버튼이 대기 단계 문구(경과 시간 포함)로 떠 있었다면 즉시 갱신한다.
+                    setJumpButtonLabel('답변 작성 중 - 보러 가기');
+                }
+
+                // 지금 화면에 보이는 세션이 이 스트림의 세션과 같을 때만 스크롤을 건드린다 -
+                // 다른 채팅을 보는 중이면 그 화면의 스크롤 위치를 이 스트림이 건드리면 안 된다.
                 const chatContainerEl2 = document.getElementById('chat-container');
-                const wasAtBottom = chatContainerEl2.scrollHeight - chatContainerEl2.scrollTop - chatContainerEl2.clientHeight < 30;
+                const isViewingThisSession = currentSessionId === activeStreamController.sessionId;
+                const wasAtBottom = isViewingThisSession &&
+                    (chatContainerEl2.scrollHeight - chatContainerEl2.scrollTop - chatContainerEl2.clientHeight < 30);
+
+                const targetDiv = activeStreamController.aiMessageDiv;
 
                 try {
                     // JSON 파싱하여 토큰 추출
@@ -1063,7 +1127,8 @@
                         tokenCount++;
                     }
 
-                    fullResponse += token;
+                    activeStreamController.fullResponse += token;
+                    const fullResponse = activeStreamController.fullResponse;
 
                     // 마크다운을 HTML로 변환 (marked.js 사용)
                     try {
@@ -1073,29 +1138,33 @@
                             gfm: true     // GitHub Flavored Markdown 활성화
                         };
                         const html = DOMPurify.sanitize(marked.parse(fullResponse, markedOptions));
-                        aiMessageDiv.innerHTML = html;
+                        targetDiv.innerHTML = html;
 
                         // 공백 보존을 위해 모든 p 태그에 white-space: pre-wrap 적용
-                        const paragraphs = aiMessageDiv.querySelectorAll('p');
+                        const paragraphs = targetDiv.querySelectorAll('p');
                         paragraphs.forEach(p => {
                             p.style.whiteSpace = 'pre-wrap';
                             p.style.wordBreak = 'break-word';
                         });
 
                         // 리스트 항목에도 공백 보존 적용
-                        const listItems = aiMessageDiv.querySelectorAll('li');
+                        const listItems = targetDiv.querySelectorAll('li');
                         listItems.forEach(li => {
                             li.style.whiteSpace = 'pre-wrap';
                         });
                     } catch (markdownError) {
                         // 마크다운 변환 오류 시 기본 텍스트로 표시
                         console.error('마크다운 변환 오류:', markdownError);
-                        aiMessageDiv.style.whiteSpace = 'pre-wrap';
-                        aiMessageDiv.style.wordBreak = 'break-word';
-                        aiMessageDiv.innerText = fullResponse;
+                        targetDiv.style.whiteSpace = 'pre-wrap';
+                        targetDiv.style.wordBreak = 'break-word';
+                        targetDiv.innerText = fullResponse;
                     }
                 } catch (error) {
                     console.error('응답 처리 중 오류:', error);
+                }
+
+                if (!isViewingThisSession) {
+                    return;
                 }
 
                 // 맨 아래에 있었을 때만 새 내용을 따라 계속 맨 아래로 내린다. 위로 스크롤해
@@ -1120,11 +1189,13 @@
                 console.error('EventSource 상태:', eventSource.readyState);
                 console.error('요청 URL:', eventSource.url);
 
-                if (thinkingIntervalId) {
-                    clearInterval(thinkingIntervalId);
-                    thinkingIntervalId = null;
+                if (activeStreamController.thinkingIntervalId) {
+                    clearInterval(activeStreamController.thinkingIntervalId);
+                    activeStreamController.thinkingIntervalId = null;
                 }
 
+                const fullResponse = activeStreamController.fullResponse;
+                const targetDiv = activeStreamController.aiMessageDiv;
                 eventSource.close();
                 finishStreaming();
 
@@ -1132,9 +1203,9 @@
                 // 재시도 버튼을 보여준다. 부분 응답이라도 받은 경우는 그 응답을 그대로 두고
                 // 세션 목록만 새로고침한다(실패로 취급하지 않음).
                 if (!fullResponse) {
-                    showRetryableError(aiMessageDiv, requestParams, sendBtn);
+                    showRetryableError(targetDiv, requestParams, sendBtn);
                 } else {
-                    enhanceCodeBlocks(aiMessageDiv);
+                    enhanceCodeBlocks(targetDiv);
                     refreshSessionsList();
                 }
             };
@@ -1146,15 +1217,16 @@
                     return;
                 }
 
-                if (thinkingIntervalId) {
-                    clearInterval(thinkingIntervalId);
-                    thinkingIntervalId = null;
+                if (activeStreamController.thinkingIntervalId) {
+                    clearInterval(activeStreamController.thinkingIntervalId);
+                    activeStreamController.thinkingIntervalId = null;
                 }
 
+                const targetDiv = activeStreamController.aiMessageDiv;
                 eventSource.close();
                 finishStreaming();
 
-                enhanceCodeBlocks(aiMessageDiv);
+                enhanceCodeBlocks(targetDiv);
 
                 // 응답 완료 후 세션 목록 새로고침 (제목 업데이트 반영)
                 refreshSessionsList();

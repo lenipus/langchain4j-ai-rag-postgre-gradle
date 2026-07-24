@@ -11,6 +11,9 @@ spring:
   config:
     import: optional:file:.env.local[.properties]
 
+embedding:
+  active-profile: ${EMBEDDING_PROFILE:bgem3}
+
 langchain4j:
   ollama:
     chat-model:
