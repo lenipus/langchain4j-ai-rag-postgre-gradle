@@ -328,11 +328,17 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
 
     @Override
     public DocumentStatusResponse getStatusResponse() {
+        // hasDocuments는 totalCount(이번 인덱싱 실행에서 "파싱이 필요했던" 파일 수)로부터
+        // 유추하면 안 된다 - mtime 최적화로 안 바뀐 파일은 파싱 자체를 건너뛰므로, 이미
+        // 문서가 잔뜩 색인돼 있어도 이번 실행에서 처리할 게 하나도 없으면 totalCount가
+        // 0이 되어 "문서가 없습니다"로 잘못 표시된다(실제로 겪은 회귀). 실제 저장된 해시
+        // 레코드 수를 직접 세어 판단한다.
         return new DocumentStatusResponse(
                 this.isProcessing(),
                 this.getProcessedCount(),
                 this.getTotalCount(),
                 this.getChangedCount(),
+                documentHashRepository.count() > 0,
                 this.isCancelRequested());
     }
 
