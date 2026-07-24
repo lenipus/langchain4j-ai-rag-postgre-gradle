@@ -364,6 +364,12 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
 
         if (existing.isPresent() && existing.get().getHash().equals(newHash)) {
             log.debug("문서 '{}' 변경 없음 (해시: {})", docId, newHash);
+            // 여기까지 온 것 자체가 EgovDocumentScanner의 mtime 사전 체크에서 "저장된
+            // mtime과 다르다"고 판단해 다시 파싱시켰다는 뜻이다(그래서 파싱 비용을 들여
+            // 여기까지 온 것). 내용은 결국 안 바뀌었더라도 mtime을 갱신해두지 않으면
+            // 다음 실행 때도 매번 다시 파싱하게 되므로(청크 재처리 없이 mtime만 새로
+            // 저장), 여기서 갱신해준다.
+            updateSourceLastModifiedOnly(existing.get(), document);
             return false;
         }
 
@@ -371,6 +377,19 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         log.debug("문서 '{}' 변경 감지 (이전 해시: {}, 새 해시: {})",
                 docId, existing.map(DocumentHashEntity::getHash).orElse("없음"), newHash);
         return true;
+    }
+
+    /**
+     * 텍스트 내용은 안 바뀌었지만(해시 동일) 파일의 mtime은 갱신해야 할 때 쓴다.
+     * 청크 재분할/재임베딩 없이 해시 레코드의 source_last_modified만 새로 저장한다.
+     */
+    private void updateSourceLastModifiedOnly(DocumentHashEntity entity, Document document) {
+        String sourceLastModified = document.metadata().getString("source_last_modified");
+        if (sourceLastModified == null) {
+            return;
+        }
+        entity.setSourceLastModified(Long.parseLong(sourceLastModified));
+        documentHashRepository.save(entity);
     }
 
     /**
