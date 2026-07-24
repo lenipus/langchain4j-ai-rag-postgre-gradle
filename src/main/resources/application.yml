@@ -38,8 +38,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-        session_factory:
-          statement_inspector: com.example.chat.config.DynamicTableInspector
+        # session_factory:
+        #  statement_inspector: com.example.chat.config.DynamicTableInspector
     show-sql: false
 
   # 빈 오버라이딩 허용

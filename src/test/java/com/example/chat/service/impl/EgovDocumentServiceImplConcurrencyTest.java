@@ -13,8 +13,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -79,11 +81,13 @@ class EgovDocumentServiceImplConcurrencyTest {
         ReflectionTestUtils.setField(service, "configuredConcurrency", 3);
 
         List<Document> allDocuments = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
         for (int i = 0; i < 9; i++) {
             allDocuments.add(doc("doc-" + i, "문서 " + i + " 본문"));
+            ids.add("doc-" + i);
         }
 
-        when(scanner.scanAll()).thenReturn(allDocuments);
+        when(scanner.scanAll()).thenReturn(new EgovDocumentScanner.ScanResult(allDocuments, ids));
         when(documentHashRepository.findAllDocIds()).thenReturn(List.of());
         when(documentHashRepository.findById(anyString())).thenReturn(Optional.empty());
         when(formatTransformer.transform(any(Document.class))).thenAnswer(inv -> inv.getArgument(0));

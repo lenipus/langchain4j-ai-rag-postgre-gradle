@@ -36,6 +36,12 @@ public class EgovPdfReader implements EgovDocumentReader {
         return parsePdfDocument(resource);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("pdf-%s_1", safeFilename);
+    }
+
     /**
      * PDF 파일의 전체 페이지를 이어 붙여 파일당 하나의 문서로 생성한다.
      *
@@ -52,7 +58,6 @@ public class EgovPdfReader implements EgovDocumentReader {
         if (filename == null) {
             filename = "unknown.pdf";
         }
-        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
 
         StringBuilder combined = new StringBuilder();
 
@@ -85,13 +90,17 @@ public class EgovPdfReader implements EgovDocumentReader {
             return List.of();
         }
 
-        String customId = String.format("pdf-%s_1", safeFilename);
+        String customId = computeDocId(resource, filename);
         Metadata metadata = Metadata.from("id", customId);
         metadata.put("file_name", filename);
         metadata.put("source", filename);
         metadata.put("type", "pdf");
         metadata.put("content_length", String.valueOf(text.length()));
         metadata.put("page_number", "1");
+        Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+        if (sourceLastModified != null) {
+            metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+        }
 
         log.debug("PDF '{}': 문서 1개로 병합 완료 (길이: {})", filename, text.length());
 

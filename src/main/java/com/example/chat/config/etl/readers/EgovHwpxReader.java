@@ -41,6 +41,12 @@ public class EgovHwpxReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("hwpx-%s_1", safeFilename);
+    }
+
     /**
      * HWPX 파일을 파싱하여 Document 생성
      * HWPXReader는 파일 경로 기반으로 동작하므로 스트림을 임시 파일에 복사한다.
@@ -71,14 +77,17 @@ public class EgovHwpxReader implements EgovDocumentReader {
                 return null;
             }
 
-            String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
-            String customId = String.format("hwpx-%s_1", safeFilename);
+            String customId = computeDocId(resource, filename);
 
             Metadata metadata = Metadata.from("id", customId);
             metadata.put("file_name", filename);
             metadata.put("source", filename);
             metadata.put("type", "hwpx");
             metadata.put("content_length", String.valueOf(content.length()));
+            Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+            if (sourceLastModified != null) {
+                metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+            }
 
             log.debug("HWPX Document ID: {} (길이: {})", customId, content.length());
 

@@ -7,37 +7,31 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.filter.Filter;
+import dev.langchain4j.store.embedding.filter.MetadataFilterBuilder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
  * {@link EgovVectorStoreWriter}가 배치 단위로 임베딩할 때 문서마다 개별
  * {@code embed()} 호출을 하지 않고, 배치 전체를 {@code embedAll()} 한 번으로
- * 처리하는지 검증한다. 건별 호출은 네트워크 왕복이 배치 크기만큼 늘어나
- * 인덱싱 속도가 문서 크기와 무관하게 느려지는 원인이었다.
+ * 처리하는지, 그리고 삭제 관련 메서드가 {@link EmbeddingStore}의 삭제 API를
+ * 올바르게 호출하는지 검증한다.
  */
 class EgovVectorStoreWriterTest {
 
     private final EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
     @SuppressWarnings("unchecked")
     private final EmbeddingStore<TextSegment> embeddingStore = mock(EmbeddingStore.class);
-    private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
-    private final EgovVectorStoreWriter writer = new EgovVectorStoreWriter(embeddingStore, embeddingModel, jdbcTemplate);
-
-    {
-        ReflectionTestUtils.setField(writer, "tableName", "document_embeddings");
-    }
+    private final EgovVectorStoreWriter writer = new EgovVectorStoreWriter(embeddingStore, embeddingModel);
 
     private Document doc(String id, String text) {
         Metadata metadata = Metadata.from("id", id);
@@ -92,37 +86,29 @@ class EgovVectorStoreWriterTest {
     }
 
     @Test
-    @DisplayName("deleteByDocIds는 각 doc_id를 metadata::jsonb ->> 'id' 조건으로 배치 삭제하고, 삭제된 행 수 합계를 반환한다")
-    @SuppressWarnings("unchecked")
-    void deleteByDocIdsBatchDeletesByMetadataId() {
-        when(jdbcTemplate.batchUpdate(anyString(), anyList())).thenReturn(new int[] { 1, 1 });
+    @DisplayName("deleteByDocIds는 metadata의 id가 주어진 목록에 속하는 임베딩을 삭제하는 필터로 removeAll을 호출한다")
+    void deleteByDocIdsRemovesByMetadataIdFilter() {
+        List<String> docIds = List.of("doc-a", "doc-b");
 
-        int deleted = writer.deleteByDocIds(List.of("doc-a", "doc-b"));
+        writer.deleteByDocIds(docIds);
 
-        assertThat(deleted).isEqualTo(2);
-
-        ArgumentCaptor<List<Object[]>> captor = ArgumentCaptor.forClass(List.class);
-        verify(jdbcTemplate).batchUpdate(contains("metadata::jsonb ->> 'id'"), captor.capture());
-        List<Object[]> batchArgs = captor.getValue();
-        assertThat(batchArgs).hasSize(2);
-        assertThat(batchArgs.get(0)).containsExactly("doc-a");
-        assertThat(batchArgs.get(1)).containsExactly("doc-b");
+        Filter expectedFilter = MetadataFilterBuilder.metadataKey("id").isIn(docIds);
+        verify(embeddingStore).removeAll(expectedFilter);
     }
 
     @Test
-    @DisplayName("deleteByDocIds에 빈 목록을 주면 JdbcTemplate을 호출하지 않는다")
+    @DisplayName("deleteByDocIds에 빈 목록을 주면 embeddingStore를 호출하지 않는다")
     void deleteByDocIdsSkipsWhenEmpty() {
-        int deleted = writer.deleteByDocIds(List.of());
+        writer.deleteByDocIds(List.of());
 
-        assertThat(deleted).isZero();
-        verifyNoInteractions(jdbcTemplate);
+        verifyNoInteractions(embeddingStore);
     }
 
     @Test
-    @DisplayName("deleteAll은 테이블 전체에 대해 DELETE를 실행한다")
+    @DisplayName("deleteAll은 embeddingStore 전체 삭제(removeAll())를 호출한다")
     void deleteAllExecutesUnconditionalDelete() {
         writer.deleteAll();
 
-        verify(jdbcTemplate).execute("DELETE FROM document_embeddings");
+        verify(embeddingStore).removeAll();
     }
 }

@@ -44,6 +44,13 @@ public class EgovExcelReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String extension = extensionOf(filename);
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("%s-%s_1", extension, safeFilename);
+    }
+
     private Document parseExcelDocument(Resource resource) throws Exception {
         String filename = resource.getFilename();
         if (filename == null) {
@@ -87,8 +94,7 @@ public class EgovExcelReader implements EgovDocumentReader {
             return null;
         }
 
-        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
-        String customId = String.format("%s-%s_1", extension, safeFilename);
+        String customId = computeDocId(resource, filename);
 
         Metadata metadata = Metadata.from("id", customId);
         metadata.put("file_name", filename);
@@ -96,6 +102,10 @@ public class EgovExcelReader implements EgovDocumentReader {
         metadata.put("type", extension);
         metadata.put("content_length", String.valueOf(content.length()));
         metadata.put("page_number", "1");
+        Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+        if (sourceLastModified != null) {
+            metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+        }
 
         log.debug("엑셀 Document ID: {} (길이: {})", customId, content.length());
 

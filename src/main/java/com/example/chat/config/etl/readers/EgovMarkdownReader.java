@@ -37,6 +37,11 @@ public class EgovMarkdownReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        return "doc-" + documentIdUtil.uniquePathKey(resource, filename);
+    }
+
     private Document processMarkdownResource(Resource resource) throws IOException {
         String filename = resource.getFilename();
         if (filename == null) {
@@ -58,7 +63,7 @@ public class EgovMarkdownReader implements EgovDocumentReader {
     }
 
     private Metadata createEnhancedMetadata(Resource resource, String filename, String content) {
-        String docId = "doc-" + documentIdUtil.uniquePathKey(resource, filename);
+        String docId = computeDocId(resource, filename);
 
         Metadata metadata = Metadata.from("id", docId);
         metadata.put("source", filename);
@@ -66,6 +71,10 @@ public class EgovMarkdownReader implements EgovDocumentReader {
         metadata.put("file_name", filename);
         metadata.put("type", "markdown");
         metadata.put("content_length", String.valueOf(content.length()));
+        Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+        if (sourceLastModified != null) {
+            metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+        }
         // (?s) DOTALL: 여러 줄 마크다운에서도 '.'이 줄바꿈을 포함해 전체 매칭되도록 한다
         metadata.put("has_headers", String.valueOf(content.matches("(?s).*#{1,6}\\s.*")));
         metadata.put("has_code_blocks", String.valueOf(content.contains("```")));

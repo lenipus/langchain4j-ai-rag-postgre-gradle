@@ -31,7 +31,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -119,13 +118,17 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
 
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // 1단계: 업로드 디렉터리 전체를 스캔해 확장자별로 알맞은 리더로 문서 읽기
-                List<Document> allDocuments = egovDocumentScanner.scanAll();
+                // 1단계: 업로드 디렉터리 전체를 스캔해 확장자별로 알맞은 리더로 문서 읽기.
+                // 파일의 mtime이 DB에 저장된 값과 같으면(안 바뀜) 파싱 자체를 건너뛰므로,
+                // allDocuments는 "새로 생겼거나 바뀐 파일"만 담는다.
+                EgovDocumentScanner.ScanResult scanResult = egovDocumentScanner.scanAll();
+                List<Document> allDocuments = scanResult.documentsToProcess();
                 totalCount.set(allDocuments.size());
 
                 // 스캔 결과에 더 이상 존재하지 않는(=원본 파일이 삭제된) 문서의 해시/임베딩 정리.
                 // 변경된 문서가 하나도 없어도 삭제는 반영해야 하므로 아래 조기 반환보다 먼저 수행한다.
-                int deletedCount = cleanupDeletedDocuments(allDocuments);
+                // (파싱을 건너뛴 "안 바뀐" 파일도 currentDocIds엔 포함되므로 삭제로 오판되지 않는다.)
+                int deletedCount = cleanupDeletedDocuments(scanResult.currentDocIds());
 
                 // 2단계: 변경된 문서 필터링
                 List<Document> changedDocuments = filterChangedDocuments(allDocuments);
@@ -372,14 +375,11 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
 
     /**
      * 원본 파일이 삭제되어 더 이상 스캔되지 않는 문서의 해시/임베딩을 정리하는 메서드.
-     * document_hashes에 남아있는 doc_id 중 이번 스캔 결과({@code currentDocuments})에
-     * 없는 것을 "삭제된 파일"로 판단한다.
+     * document_hashes에 남아있는 doc_id 중 이번 스캔에서 발견된 현재 파일 ID
+     * ({@code currentIds} - 파싱을 건너뛴 "안 바뀐" 파일도 포함된 전체 집합)에 없는 것을
+     * "삭제된 파일"로 판단한다.
      */
-    private int cleanupDeletedDocuments(List<Document> currentDocuments) {
-        Set<String> currentIds = currentDocuments.stream()
-                .map(document -> document.metadata().getString("id"))
-                .collect(Collectors.toSet());
-
+    private int cleanupDeletedDocuments(Set<String> currentIds) {
         List<String> deletedIds = documentHashRepository.findAllDocIds().stream()
                 .filter(docId -> !currentIds.contains(docId))
                 .toList();
@@ -396,7 +396,10 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     }
 
     /**
-     * 문서 처리 완료 후 해시값을 저장하는 메서드
+     * 문서 처리 완료 후 해시값을 저장하는 메서드. 리더가 메타데이터에 남긴
+     * {@code source_last_modified}(원본 파일 mtime)도 같이 저장해, 다음 재인덱싱 때
+     * {@link com.example.chat.config.etl.readers.EgovDocumentScanner}가 파싱 없이
+     * "이 파일이 바뀌었는지" 먼저 확인할 수 있게 한다.
      */
     private void saveDocumentHash(Document document) {
         String docId = document.metadata().getString("id");
@@ -405,6 +408,10 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         if (content != null && !content.trim().isEmpty()) {
             String newHash = DocumentHashUtil.calculateHash(content);
             DocumentHashEntity entity = new DocumentHashEntity(docId, newHash);
+            String sourceLastModified = document.metadata().getString("source_last_modified");
+            if (sourceLastModified != null) {
+                entity.setSourceLastModified(Long.parseLong(sourceLastModified));
+            }
             documentHashRepository.save(entity);
         }
     }

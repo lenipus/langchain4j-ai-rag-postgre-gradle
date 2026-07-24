@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,7 +56,8 @@ class EgovDocumentServiceImplHashCommitTest {
         Document doc2 = doc("doc-2", "두 번째 문서 본문");
         List<Document> allDocuments = List.of(doc1, doc2);
 
-        when(scanner.scanAll()).thenReturn(allDocuments);
+        when(scanner.scanAll()).thenReturn(
+                new EgovDocumentScanner.ScanResult(allDocuments, Set.of("doc-1", "doc-2")));
         when(documentHashRepository.findAllDocIds()).thenReturn(List.of());
         when(documentHashRepository.findById(anyString())).thenReturn(Optional.empty());
         // 정규화는 그대로 통과, 청크 분할은 1문서 = 1청크로 단순화(입력 문서를 그대로 청크로 반환).

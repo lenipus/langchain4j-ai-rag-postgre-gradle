@@ -45,6 +45,12 @@ public class EgovJsonReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("json-%s_1", safeFilename);
+    }
+
     private Document parseJsonDocument(Resource resource) throws Exception {
         String filename = resource.getFilename();
         if (filename == null) {
@@ -85,8 +91,7 @@ public class EgovJsonReader implements EgovDocumentReader {
             return null;
         }
 
-        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
-        String customId = String.format("json-%s_1", safeFilename);
+        String customId = computeDocId(resource, filename);
 
         Metadata metadata = Metadata.from("id", customId);
         metadata.put("file_name", filename);
@@ -94,6 +99,10 @@ public class EgovJsonReader implements EgovDocumentReader {
         metadata.put("type", "json");
         metadata.put("content_length", String.valueOf(content.length()));
         metadata.put("page_number", "1");
+        Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+        if (sourceLastModified != null) {
+            metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+        }
         if (!originalFileName.isBlank()) {
             metadata.put("original_file_name", originalFileName);
         }

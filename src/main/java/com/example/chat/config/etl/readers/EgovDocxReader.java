@@ -37,6 +37,12 @@ public class EgovDocxReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("docx-%s_1", safeFilename);
+    }
+
     /**
      * DOCX 파일을 파싱하여 Document 생성
      */
@@ -57,14 +63,17 @@ public class EgovDocxReader implements EgovDocumentReader {
                 return null;
             }
 
-            String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
-            String customId = String.format("docx-%s_1", safeFilename);
+            String customId = computeDocId(resource, filename);
 
             Metadata metadata = Metadata.from("id", customId);
             metadata.put("file_name", filename);
             metadata.put("source", filename);
             metadata.put("type", "docx");
             metadata.put("content_length", String.valueOf(content.length()));
+            Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+            if (sourceLastModified != null) {
+                metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+            }
 
             log.debug("DOCX Document ID: {} (길이: {})", customId, content.length());
 

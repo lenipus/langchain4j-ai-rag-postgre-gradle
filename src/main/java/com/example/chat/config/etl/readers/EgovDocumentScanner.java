@@ -1,5 +1,7 @@
 package com.example.chat.config.etl.readers;
 
+import com.example.chat.entity.DocumentHashEntity;
+import com.example.chat.repository.DocumentHashRepository;
 import dev.langchain4j.data.document.Document;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +33,7 @@ import java.util.TreeMap;
 public class EgovDocumentScanner {
 
     private final Map<String, EgovDocumentReader> readersByExtension;
+    private final DocumentHashRepository documentHashRepository;
 
     @Value("${document.upload-dir}")
     private String uploadDir;
@@ -38,7 +41,7 @@ public class EgovDocumentScanner {
     @Value("${document.allowed-upload-extensions}")
     private String[] allowedUploadExtensions;
 
-    public EgovDocumentScanner(List<EgovDocumentReader> readers) {
+    public EgovDocumentScanner(List<EgovDocumentReader> readers, DocumentHashRepository documentHashRepository) {
         Map<String, EgovDocumentReader> map = new HashMap<>();
         for (EgovDocumentReader reader : readers) {
             for (String extension : reader.supportedExtensions()) {
@@ -46,12 +49,29 @@ public class EgovDocumentScanner {
             }
         }
         this.readersByExtension = Map.copyOf(map);
+        this.documentHashRepository = documentHashRepository;
+    }
+
+    /**
+     * {@link #scanAll()}의 결과.
+     *
+     * @param documentsToProcess 새로 생겼거나 파일이 바뀐(mtime 불일치) 문서 - 이후 텍스트
+     *                           해시 비교/청크 분할/임베딩 대상이 된다.
+     * @param currentDocIds      현재 업로드 폴더에 실제로 존재하는 파일 전체의 ID(파싱을
+     *                           건너뛴 안 바뀐 파일 포함) - 삭제된 파일 정리(cleanup)에 쓴다.
+     */
+    public record ScanResult(List<Document> documentsToProcess, Set<String> currentDocIds) {
     }
 
     /**
      * 업로드 디렉터리 전체를 스캔해 허용된 확장자의 파일을 각 리더로 파싱한다.
+     *
+     * <p>파일마다 파싱(예: PDF 텍스트 추출) 전에 {@link EgovDocumentReader#computeDocId}로
+     * ID만 먼저 계산해, DB에 저장된 이전 수정 시각과 현재 파일의 수정 시각이 같으면 파싱
+     * 자체를 건너뛴다 - 안 바뀐 파일도 매번 전체 파싱했던 낭비를 없앤다. mtime을 알 수
+     * 없거나(테스트 리소스 등) DB에 기록이 없으면 안전하게 "바뀜"으로 보고 파싱한다.</p>
      */
-    public List<Document> scanAll() {
+    public ScanResult scanAll() {
         Set<String> allowedExtensions = normalizeExtensions(allowedUploadExtensions);
 
         Resource[] resources;
@@ -60,11 +80,13 @@ public class EgovDocumentScanner {
                     .getResources("file:" + uploadDir.replace(File.separatorChar, '/') + "/**/*");
         } catch (IOException e) {
             log.warn("문서 디렉터리를 스캔할 수 없습니다: {}", uploadDir);
-            return List.of();
+            return new ScanResult(List.of(), Set.of());
         }
 
-        List<Document> allDocuments = new ArrayList<>();
+        List<Document> documentsToProcess = new ArrayList<>();
+        Set<String> currentDocIds = new HashSet<>();
         Map<String, Integer> countByExtension = new TreeMap<>();
+        int skippedUnchanged = 0;
 
         for (Resource resource : resources) {
             String filename = resource.getFilename();
@@ -84,9 +106,17 @@ public class EgovDocumentScanner {
             }
 
             try {
+                String docId = reader.computeDocId(resource, filename);
+                currentDocIds.add(docId);
+
+                if (isUnchangedSinceLastIndex(resource, docId)) {
+                    skippedUnchanged++;
+                    continue;
+                }
+
                 List<Document> documents = reader.parse(resource);
                 if (!documents.isEmpty()) {
-                    allDocuments.addAll(documents);
+                    documentsToProcess.addAll(documents);
                     countByExtension.merge(extension, documents.size(), Integer::sum);
                 }
             } catch (Exception e) {
@@ -94,8 +124,26 @@ public class EgovDocumentScanner {
             }
         }
 
-        log.info("총 {}개의 문서를 로드했습니다. (확장자별: {})", allDocuments.size(), countByExtension);
-        return allDocuments;
+        log.info("총 {}개 파일 스캔 - {}개 파싱 필요, {}개는 변경 없어 건너뜀 (확장자별 파싱: {})",
+                currentDocIds.size(), documentsToProcess.size(), skippedUnchanged, countByExtension);
+        return new ScanResult(documentsToProcess, currentDocIds);
+    }
+
+    /**
+     * 파일의 수정 시각이 DB에 저장된 마지막 처리 시각과 같으면(=안 바뀜) true.
+     * mtime을 못 구하거나(테스트용 리소스 등) 저장된 값이 없으면(신규 파일, 이 기능
+     * 도입 전 레코드 등) false를 반환해 항상 파싱하도록 안전하게 폴백한다.
+     */
+    private boolean isUnchangedSinceLastIndex(Resource resource, String docId) {
+        try {
+            long currentModified = resource.getFile().lastModified();
+            return documentHashRepository.findById(docId)
+                    .map(DocumentHashEntity::getSourceLastModified)
+                    .map(stored -> stored == currentModified)
+                    .orElse(false);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private boolean isRegularFile(Resource resource) {

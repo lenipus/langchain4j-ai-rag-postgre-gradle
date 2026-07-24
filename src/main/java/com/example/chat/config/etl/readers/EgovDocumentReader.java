@@ -21,4 +21,14 @@ public interface EgovDocumentReader {
 
     /** 파일 하나를 파싱해 문서(청크 이전 단위)를 생성한다. 추출할 내용이 없으면 빈 리스트를 반환한다. */
     List<Document> parse(Resource resource) throws Exception;
+
+    /**
+     * 파싱 없이 파일 경로만으로 이 문서의 ID를 계산한다. {@link #parse}가 실제로 만드는
+     * Document의 {@code id} 메타데이터와 반드시 같은 값을 반환해야 한다.
+     *
+     * <p>{@link EgovDocumentScanner}가 파싱(PDF 텍스트 추출 등 비용이 큰 작업)을 하기 전에,
+     * 파일의 수정 시각이 DB에 저장된 값과 같은지 먼저 확인해 안 바뀐 파일은 파싱 자체를
+     * 건너뛰는 데 쓴다.</p>
+     */
+    String computeDocId(Resource resource, String filename);
 }

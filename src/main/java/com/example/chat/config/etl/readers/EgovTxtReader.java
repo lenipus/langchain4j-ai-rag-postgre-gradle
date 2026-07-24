@@ -36,6 +36,12 @@ public class EgovTxtReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("txt-%s_1", safeFilename);
+    }
+
     private Document processTxtResource(Resource resource) throws Exception {
         String filename = resource.getFilename();
         if (filename == null) {
@@ -53,8 +59,7 @@ public class EgovTxtReader implements EgovDocumentReader {
             return null;
         }
 
-        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
-        String customId = String.format("txt-%s_1", safeFilename);
+        String customId = computeDocId(resource, filename);
 
         Metadata metadata = Metadata.from("id", customId);
         metadata.put("file_name", filename);
@@ -62,6 +67,10 @@ public class EgovTxtReader implements EgovDocumentReader {
         metadata.put("type", "txt");
         metadata.put("content_length", String.valueOf(content.length()));
         metadata.put("page_number", "1");
+        Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+        if (sourceLastModified != null) {
+            metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+        }
 
         log.info("TXT 문서 로드 완료: {}, 크기: {}바이트", filename, content.length());
 

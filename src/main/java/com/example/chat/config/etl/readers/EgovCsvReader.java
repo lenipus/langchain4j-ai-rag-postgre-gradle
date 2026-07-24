@@ -54,6 +54,12 @@ public class EgovCsvReader implements EgovDocumentReader {
         return document == null ? List.of() : List.of(document);
     }
 
+    @Override
+    public String computeDocId(Resource resource, String filename) {
+        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
+        return String.format("csv-%s_1", safeFilename);
+    }
+
     private Document parseCsvDocument(Resource resource) throws Exception {
         String filename = resource.getFilename();
         if (filename == null) {
@@ -97,8 +103,7 @@ public class EgovCsvReader implements EgovDocumentReader {
             return null;
         }
 
-        String safeFilename = documentIdUtil.uniquePathKey(resource, filename);
-        String customId = String.format("csv-%s_1", safeFilename);
+        String customId = computeDocId(resource, filename);
 
         Metadata metadata = Metadata.from("id", customId);
         metadata.put("file_name", filename);
@@ -106,6 +111,10 @@ public class EgovCsvReader implements EgovDocumentReader {
         metadata.put("type", "csv");
         metadata.put("content_length", String.valueOf(content.length()));
         metadata.put("page_number", "1");
+        Long sourceLastModified = documentIdUtil.lastModifiedOrNull(resource);
+        if (sourceLastModified != null) {
+            metadata.put("source_last_modified", String.valueOf(sourceLastModified));
+        }
 
         log.debug("CSV Document ID: {} (길이: {})", customId, content.length());
 

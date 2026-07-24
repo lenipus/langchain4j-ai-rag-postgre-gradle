@@ -42,4 +42,18 @@ public class DocumentIdUtil {
         }
         return path.replaceAll("[\\\\/:*?\"<>|]", "-").replaceAll("\\s+", "-");
     }
+
+    /**
+     * 파일의 마지막 수정 시각(epoch millis)을 반환한다. 실제 파일 기반이 아닌 리소스
+     * (테스트용 {@code ByteArrayResource} 등)는 {@code getFile()}에서 IOException이 나므로
+     * null을 반환한다 - 이 경우 재인덱싱 시 mtime 비교를 건너뛰고 항상 파싱하게 된다
+     * (안전한 폴백: 못 판단하면 다시 처리).
+     */
+    public Long lastModifiedOrNull(Resource resource) {
+        try {
+            return resource.getFile().lastModified();
+        } catch (IOException e) {
+            return null;
+        }
+    }
 }
