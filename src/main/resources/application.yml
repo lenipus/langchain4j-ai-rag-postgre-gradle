@@ -97,16 +97,15 @@ pgvector:
   distance-type: cosine   # 거리 측정 방식: (cosine, euclidean, inner_product)
   hash-table-name: ${embedding.profiles.${embedding.active-profile}.hash-table-name}
 
-# 문서 처리 설정
 document:
   allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
   upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
   chunk-size: 1200
-  chunk-overlap: 150
+  chunk-overlap: 120
 
   # 재인덱싱 시 파일 단위 동시 처리 개수 (1 ~ 4)
   processing:
-    concurrency: 2
+    concurrency: 1
 
   normalization:
     enabled: true
@@ -128,6 +127,11 @@ rag:
   retrieval:
     overfetch-multiplier: 3
     min-chunk-length: 250
+
+    # 검색된 청크가 잘린 것으로 보일 때(EgovNeighborChunkExpander), 이웃 청크에서 실제로
+    # 덧붙일 최대 길이. 인덱싱 시 chunk-overlap과는 별개 값 - chunk-overlap은 그대로 두고
+    # 싶어서 분리했다.
+    neighbor-expansion-chars: 400
 
     # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
     hybrid:

@@ -31,6 +31,14 @@ public class EgovRagConfig {
     @Value("${pgvector.table-name:document_embeddings}")
     private String tableName;
 
+    /** 이웃 청크 확장의 잘림 판단 기준({@code EgovNeighborChunkExpander} 참고). */
+    @Value("${document.chunk-size}")
+    private int chunkSize;
+
+    /** 이웃 청크에서 실제로 덧붙일 최대 길이. 인덱싱 시 chunk-overlap과는 별개 값이다. */
+    @Value("${rag.retrieval.neighbor-expansion-chars:400}")
+    private int neighborExpansionChars;
+
     /** 검색 결과 중 이 길이(문자) 미만인 청크는 스퓨리어스 매칭으로 간주해 제외한다. */
     @Value("${rag.retrieval.min-chunk-length:50}")
     private int minChunkLength;
@@ -61,12 +69,14 @@ public class EgovRagConfig {
      *
      * @param embeddingStore 벡터 저장소
      * @param embeddingModel 임베딩 모델
+     * @param jdbcTemplate   이웃 청크 확장(id/index 기반 앞뒤 청크 조회)용
      * @return ContentRetriever
      */
     @Bean
     public ContentRetriever contentRetriever(
             EmbeddingStore<TextSegment> embeddingStore,
-            EmbeddingModel embeddingModel) {
+            EmbeddingModel embeddingModel,
+            JdbcTemplate jdbcTemplate) {
 
         int overfetchResults = topK * overfetchMultiplier;
         log.info("ContentRetriever 초기화 - topK: {}, minScore: {}, overfetch: {}, minChunkLength: {}",
@@ -80,7 +90,11 @@ public class EgovRagConfig {
                 .build();
 
         // top-k보다 넉넉히 가져온 뒤, 짧은 청크(스퓨리어스 매칭 위험)를 걸러내고 최종 topK로 자른다.
-        return new EgovLengthFilteringContentRetriever(embeddingRetriever, minChunkLength, topK);
+        ContentRetriever lengthFiltered = new EgovLengthFilteringContentRetriever(embeddingRetriever, minChunkLength, topK);
+
+        // 최종 topK로 추려진 뒤에 이웃 청크를 붙인다 - overfetch 단계(topK*overfetchMultiplier개)가
+        // 아니라 이미 topK로 줄어든 결과에만 앞/뒤 청크 조회 쿼리를 실행해 DB 왕복을 최소화한다.
+        return new EgovNeighborChunkExpander(lengthFiltered, jdbcTemplate, tableName, chunkSize, neighborExpansionChars);
     }
 
     /**

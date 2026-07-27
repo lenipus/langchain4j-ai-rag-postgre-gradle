@@ -35,6 +35,10 @@ langchain4j:
       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
       model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
 
+document:
+  chunk-size: 2000
+  chunk-overlap: 200
+
 # RAG 설정 - 필요하면 이 프로파일에서만 다르게 조정 (지금은 local과 동일하게 시작)
 rag:
   similarity:

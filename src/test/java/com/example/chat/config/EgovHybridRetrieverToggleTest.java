@@ -25,7 +25,10 @@ import static org.mockito.Mockito.mock;
 class EgovHybridRetrieverToggleTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(TestBeans.class, EgovRagConfig.class);
+            .withUserConfiguration(TestBeans.class, EgovRagConfig.class)
+            // document.chunk-size는 기본값이 없는 필수 프로퍼티(EgovNeighborChunkExpander의
+            // 잘림 판단 기준)라 contentRetriever 빈 생성에 필요하다.
+            .withPropertyValues("document.chunk-size=1200");
 
     @Test
     @DisplayName("토글 off(기본): 하이브리드 빈 미등록, ContentRetriever 는 dense 단일")

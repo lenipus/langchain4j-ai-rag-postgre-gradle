@@ -72,7 +72,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                         .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
                                 sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
                         .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
-                        .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+                        .transform(s -> applyRetryAndErrorHandling(s, "RAG", sessionId));
             }, sessionId);
 
         } catch (Exception e) {
@@ -115,7 +115,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                         .doOnComplete(() -> log.info("Simple 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
                                 sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
                         .doOnError(e -> log.error("Simple 스트리밍 오류 - 세션: {}", sessionId, e))
-                        .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+                        .transform(s -> applyRetryAndErrorHandling(s, "Simple", sessionId));
             }, sessionId);
 
         } catch (Exception e) {
@@ -165,7 +165,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                         .doOnComplete(() -> log.info("SQL 생성 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
                                 sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
                         .doOnError(e -> log.error("SQL 생성 스트리밍 오류 - 세션: {}", sessionId, e))
-                        .transform(stream -> applyRetryAndErrorHandling(stream, "SQL 생성", sessionId));
+                        .transform(s -> applyRetryAndErrorHandling(s, "SQL 생성", sessionId));
             }, sessionId);
 
         } catch (Exception e) {
@@ -327,20 +327,15 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         return null;
     }
 
-    private Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
+    /**
+     * 스트리밍 중 오류를 친화적 메시지로 변환한다(자동 재시도는 하지 않음).
+     *
+     */
+    // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
+    Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
         return stream
-                .retryWhen(reactor.util.retry.Retry.backoff(3, java.time.Duration.ofSeconds(1))
-                        .filter(throwable -> {
-                            String msg = throwable.getMessage();
-                            boolean is503Error = msg != null && (msg.contains("503") || msg.contains("Service Temporarily Unavailable"));
-                            if (is503Error) {
-                                log.warn("[{}] LLM 서버 503 감지 - 재시도 중... (세션: {})", serviceType, sessionId);
-                            }
-                            return is503Error;
-                        })
-                )
                 .onErrorResume(e -> {
-                    log.error("[{}] 스트리밍 최종 실패 - 세션: {}", serviceType, sessionId, e);
+                    log.error("[{}] 스트리밍 실패 - 세션: {}", serviceType, sessionId, e);
                     return Flux.just("\n[오류: " + friendlyErrorMessage(e) + "]");
                 });
     }

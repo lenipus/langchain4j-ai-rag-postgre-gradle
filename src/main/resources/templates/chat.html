@@ -1223,10 +1223,19 @@
                 }
 
                 const targetDiv = activeStreamController.aiMessageDiv;
+                const fullResponse = activeStreamController.fullResponse;
                 eventSource.close();
                 finishStreaming();
 
                 enhanceCodeBlocks(targetDiv);
+
+                // 백엔드(EgovChatServiceImpl.applyRetryAndErrorHandling)가 연결을 끊지 않고
+                // 본문에 "[오류: ...]" 친화적 메시지만 흘려보낸 경우(예: 503, 컨텍스트 초과)는
+                // EventSource.onerror가 아니라 이 정상 완료 경로로 온다 - 이미 렌더링된 메시지는
+                // 그대로 두고 재시도 버튼만 덧붙인다.
+                if (fullResponse.includes('[오류: ')) {
+                    appendRetryButton(targetDiv, requestParams, sendBtn);
+                }
 
                 // 응답 완료 후 세션 목록 새로고침 (제목 업데이트 반영)
                 refreshSessionsList();
@@ -1244,6 +1253,12 @@
             errorText.textContent = '응답 생성 중 오류가 발생했습니다. 네트워크 연결을 확인해 주세요.';
             aiMessageDiv.appendChild(errorText);
 
+            appendRetryButton(aiMessageDiv, requestParams, sendBtn);
+        }
+
+        // 스트림은 정상 종료됐지만 백엔드가 본문에 "[오류: ...]" 친화적 메시지를 흘려보낸
+        // 경우, 이미 렌더링된 메시지 내용은 그대로 두고 재시도 버튼만 아래에 덧붙인다.
+        function appendRetryButton(aiMessageDiv, requestParams, sendBtn) {
             const retryBtn = document.createElement('button');
             retryBtn.type = 'button';
             retryBtn.className = 'retry-btn';

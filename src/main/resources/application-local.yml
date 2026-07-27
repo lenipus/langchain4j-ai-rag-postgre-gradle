@@ -30,6 +30,10 @@ langchain4j:
       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
       model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
 
+document:
+  chunk-size: 1200
+  chunk-overlap: 120
+
 # RAG 설정
 rag:
   similarity:
