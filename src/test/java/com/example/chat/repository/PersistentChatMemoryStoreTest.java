@@ -15,7 +15,6 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -167,50 +166,48 @@ class PersistentChatMemoryStoreTest {
     }
 
     @Test
-    @DisplayName("마지막이 USER면(직전 시도가 응답 없이 실패) 그 꼬리에 매달린 USER 메시지(들)를 지운다")
-    void deletesTrailingUserMessagesAfterFailedAttempt() {
+    @DisplayName("직전 시도가 응답 없이 실패해(마지막 저장분이 USER) 재시도로 새 USER 메시지가 add()되면, " +
+            "추가가 아니라 그 마지막 USER 행을 새 메시지로 교체한다(중복 방지)")
+    void replacesDanglingUserMessageInsteadOfAppending() {
         ChatMemoryEntity oldUser = new ChatMemoryEntity("session-8", "USER", "겸직허가 규정 좀 알려줘");
-        oldUser.setId(1L);
         ChatMemoryEntity oldAi = new ChatMemoryEntity("session-8", "ASSISTANT", "겸직허가는 사전 승인이 필요합니다.");
-        oldAi.setId(2L);
-        ChatMemoryEntity danglingUser1 = new ChatMemoryEntity("session-8", "USER", "출장은 어떻게 신청해?");
-        danglingUser1.setId(3L);
-        ChatMemoryEntity danglingUser2 = new ChatMemoryEntity("session-8", "USER", "출장은 어떻게 신청해?");
-        danglingUser2.setId(4L);
+        ChatMemoryEntity danglingUser = new ChatMemoryEntity("session-8", "USER", "출장은 어떻게 신청해?");
         when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-8"))
-                .thenReturn(List.of(oldUser, oldAi, danglingUser1, danglingUser2));
+                .thenReturn(List.of(oldUser, oldAi, danglingUser));
 
-        store.deleteTrailingUserMessages("session-8");
+        // MessageWindowChatMemory가 [oldUser, oldAi, danglingUser] 3개를 재로딩한 뒤 재시도로
+        // 생긴 새 USER 메시지를 add()해 4개가 된 상태 - danglingUser는 실패한 이전 시도의 잔재다.
+        store.updateMessages("session-8", List.of(
+                UserMessage.from("겸직허가 규정 좀 알려줘"),
+                AiMessage.from("겸직허가는 사전 승인이 필요합니다."),
+                UserMessage.from("출장은 어떻게 신청해?"), // danglingUser 재로딩분
+                UserMessage.from("출장은 어떻게 신청해?")), "turn-B"); // 이번 재시도로 add()된 메시지
 
-        verify(chatMemoryRepository).deleteById(3L);
-        verify(chatMemoryRepository).deleteById(4L);
-        verify(chatMemoryRepository, never()).deleteById(1L);
-        verify(chatMemoryRepository, never()).deleteById(2L);
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository, times(3)).save(captor.capture());
+        List<ChatMemoryEntity> saved = captor.getAllValues();
+
+        // danglingUser 자리는 사라지고, 재시도 메시지 하나만 새 turnId로 저장된다(중복 없음).
+        assertThat(saved).hasSize(3);
+        assertThat(saved.get(2).getContent()).isEqualTo("출장은 어떻게 신청해?");
+        assertThat(saved.get(2).getTurnId()).isEqualTo("turn-B");
     }
 
     @Test
-    @DisplayName("마지막이 ASSISTANT면(정상 종료된 세션) 아무것도 지우지 않는다")
-    void doesNothingWhenLastMessageIsAssistant() {
-        ChatMemoryEntity user = new ChatMemoryEntity("session-9", "USER", "겸직허가 규정 좀 알려줘");
-        user.setId(1L);
-        ChatMemoryEntity ai = new ChatMemoryEntity("session-9", "ASSISTANT", "겸직허가는 사전 승인이 필요합니다.");
-        ai.setId(2L);
+    @DisplayName("정상적으로 끝난 세션(마지막이 ASSISTANT)에 새 질문을 보내면 교체 없이 그냥 추가된다")
+    void appendsNormallyWhenLastMessageIsAssistant() {
+        ChatMemoryEntity oldUser = new ChatMemoryEntity("session-9", "USER", "겸직허가 규정 좀 알려줘");
+        ChatMemoryEntity oldAi = new ChatMemoryEntity("session-9", "ASSISTANT", "겸직허가는 사전 승인이 필요합니다.");
         when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-9"))
-                .thenReturn(List.of(user, ai));
+                .thenReturn(List.of(oldUser, oldAi));
 
-        store.deleteTrailingUserMessages("session-9");
+        store.updateMessages("session-9", List.of(
+                UserMessage.from("겸직허가 규정 좀 알려줘"),
+                AiMessage.from("겸직허가는 사전 승인이 필요합니다."),
+                UserMessage.from("출장은 어떻게 신청해?")), "turn-B");
 
-        verify(chatMemoryRepository, never()).deleteById(org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    @DisplayName("세션에 메시지가 하나도 없으면 아무것도 하지 않는다")
-    void doesNothingWhenSessionIsEmpty() {
-        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-10"))
-                .thenReturn(List.of());
-
-        store.deleteTrailingUserMessages("session-10");
-
-        verify(chatMemoryRepository, never()).deleteById(org.mockito.ArgumentMatchers.any());
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository, times(3)).save(captor.capture());
+        assertThat(captor.getAllValues().get(2).getContent()).isEqualTo("출장은 어떻게 신청해?");
     }
 }

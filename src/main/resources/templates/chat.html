@@ -177,7 +177,6 @@
         </div>
         <div class="tabs">
             <div class="tab active" id="rag-tab" onclick="switchTab('rag')">RAG 채팅</div>
-            <div class="tab" id="simple-tab" onclick="switchTab('simple')">일반 채팅</div>
             <div class="tab" id="sqlgen-tab" th:if="${sqlgenEnabled}" onclick="switchTab('sqlgen')">SQL 생성</div>
         </div>
 
@@ -191,7 +190,6 @@
                     • 또는 "문서 재인덱싱" 버튼을 클릭하여 기존 문서를 다시 로드하세요<br>
                     <strong>채팅 모드:</strong><br>
                     • <strong>RAG 채팅:</strong> 업로드된 문서를 기반으로 한 질의응답<br>
-                    • <strong>일반 채팅:</strong> 일반적인 대화 (문서 없이도 가능)<br>
                     • <strong>SQL 생성:</strong> DB 연결/테이블을 선택해 자연어로 SQL 쿼리 생성
                 </div>
             </div>
@@ -1069,6 +1067,9 @@
             sendBtn.classList.add('stop-mode');
             sendBtn.title = '응답 중지';
             aiMessageDiv.innerHTML = '';
+            // 재시도로 재사용되는 div라면 실패 표시용으로 넣었던 인라인 스타일(회색/기울임/
+            // 작은 글씨)이 남아있을 수 있다 - 정상 답변을 그 스타일 그대로 보여주지 않도록 지운다.
+            aiMessageDiv.removeAttribute('style');
 
             const chatContainerEl = document.getElementById('chat-container');
             chatContainerEl.scrollTop = chatContainerEl.scrollHeight;
@@ -1343,6 +1344,13 @@
             retryBtn.textContent = '⟳';
             retryBtn.onclick = () => {
                 wrap.remove();
+                // 아이콘 생성 시점이 아니라 클릭 시점에 모델을 다시 확인한다 - 페이지 로드
+                // 직후처럼 모델 목록이 아직 안 불러와졌을 때 만들어진 아이콘은 model이
+                // 빈 값으로 굳어있을 수 있다("model is required" 오류로 이어짐).
+                const currentModel = getSelectedModel();
+                if (currentModel) {
+                    requestParams.model = currentModel;
+                }
                 streamAiResponse(requestParams, aiMessageDiv, sendBtn);
             };
 

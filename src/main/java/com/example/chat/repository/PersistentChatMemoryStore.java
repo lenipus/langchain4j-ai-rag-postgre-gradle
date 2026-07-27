@@ -113,6 +113,20 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         List<ChatMemoryEntity> existing = chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         int existingCount = existing.size();
 
+        // "중지" 직후 재질문, 또는 응답 없이 실패한 시도(예: 503) 후 재시도처럼, 직전에
+        // 저장된 마지막 메시지도 USER인데 이번에도 새 USER 메시지가 그 뒤에 add()된
+        // 경우 - 그대로 두면 실패한 질문이 재시도 때마다 하나씩 쌓인다. 이때는 추가가
+        // 아니라 마지막 기존 USER 행을 이번 메시지로 교체한다.
+        if (existingCount > 0 && messages.size() == existingCount + 1
+                && "USER".equals(existing.get(existingCount - 1).getMessageType())
+                && messages.get(existingCount) instanceof UserMessage) {
+            ChatMessage newUserMessage = messages.get(existingCount);
+            List<ChatMessage> replaced = new ArrayList<>(messages.subList(0, existingCount - 1));
+            replaced.add(newUserMessage);
+            messages = replaced;
+            existingCount--;
+        }
+
         // 기존 메시지 삭제
         chatMemoryRepository.deleteBySessionId(sessionId);
 
@@ -143,37 +157,6 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         log.info("채팅 메모리 삭제 - 세션: {}", sessionId);
 
         chatMemoryRepository.deleteBySessionId(sessionId);
-    }
-
-    /**
-     * 이전 시도가 응답 없이 실패해서(예: 503) 사용자 메시지만 저장되고 AI 메시지가
-     * 못 붙은 채로 남아있는 경우, 그 꼬리에 매달린 USER 메시지(들)를 정리한다.
-     *
-     * <p>{@code ChatbotFactory}가 새 챗봇을 만들 때마다(최초 전송이든 "재시도" 버튼 클릭이든)
-     * 매번 호출한다. {@code MessageWindowChatMemory.add()}는 "현재 저장된 메시지를 읽고 →
-     * 새 메시지를 끝에 추가 → 다시 저장"하는 방식이라, 실패로 끝난 이전 시도의 사용자
-     * 메시지를 지우지 않고 재시도하면 같은 질문이 채팅 기록에 계속 중복으로 쌓인다(재시도할
-     * 때마다 1개씩 늘어남). 정상적으로 끝난 세션은 항상 마지막이 ASSISTANT 메시지이므로,
-     * 마지막이 USER인 경우에만(=직전 시도가 실패한 경우에만) 정리 대상이 된다.</p>
-     *
-     * @param sessionId 세션 ID
-     */
-    @Transactional
-    public void deleteTrailingUserMessages(String sessionId) {
-        List<ChatMemoryEntity> existing = chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
-
-        int cut = existing.size();
-        while (cut > 0 && "USER".equals(existing.get(cut - 1).getMessageType())) {
-            cut--;
-        }
-        if (cut == existing.size()) {
-            return;
-        }
-
-        for (int i = cut; i < existing.size(); i++) {
-            chatMemoryRepository.deleteById(existing.get(i).getId());
-        }
-        log.info("실패한 이전 시도로 남은 사용자 메시지 {}개 정리 - 세션: {}", existing.size() - cut, sessionId);
     }
 
     /**
