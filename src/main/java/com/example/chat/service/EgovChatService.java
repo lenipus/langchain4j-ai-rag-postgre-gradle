@@ -14,21 +14,23 @@ public interface EgovChatService {
      * 세션별 RAG 기반 스트리밍 응답 생성
      * 벡터 저장소에서 관련 문서를 검색하여 LLM에 전달하고 스트리밍 응답 생성
      *
-     * @param query 사용자 질의
-     * @param model 사용할 모델명 (null이면 기본 모델 사용)
+     * @param query      사용자 질의
+     * @param model      사용할 모델명 (null이면 기본 모델 사용)
+     * @param imageToken 첨부 이미지 토큰({@code PendingImageStore}, 없으면 null) - 비전 지원 모델일 때만 의미 있음
      * @return 스트리밍 응답 Flux
      */
-    Flux<String> streamRagResponse(String query, String model);
+    Flux<String> streamRagResponse(String query, String model, String imageToken);
 
     /**
      * 세션별 일반 스트리밍 응답 생성
      * 벡터 저장소 검색 없이 LLM에 직접 질의하여 스트리밍 응답 생성
      *
-     * @param query 사용자 질의
-     * @param model 사용할 모델명 (null이면 기본 모델 사용)
+     * @param query      사용자 질의
+     * @param model      사용할 모델명 (null이면 기본 모델 사용)
+     * @param imageToken 첨부 이미지 토큰({@code PendingImageStore}, 없으면 null) - 비전 지원 모델일 때만 의미 있음
      * @return 스트리밍 응답 Flux
      */
-    Flux<String> streamSimpleResponse(String query, String model);
+    Flux<String> streamSimpleResponse(String query, String model, String imageToken);
 
     /**
      * 세션별 SQL 생성 스트리밍 응답 생성

@@ -154,6 +154,10 @@ chat:
   memory:
     max-messages: 20
     table-name: chat_memory
+  # false면 이미지 첨부(붙여넣기/드래그) UI를 안 보여주고, 업로드/스트리밍 요청에 이미지가
+  # 실려와도 무시한다 - 비전 미지원 모델을 쓸 때 끄는 용도.
+  image-attachment:
+    enabled: true
 
 # 세션 관리 설정
 session:

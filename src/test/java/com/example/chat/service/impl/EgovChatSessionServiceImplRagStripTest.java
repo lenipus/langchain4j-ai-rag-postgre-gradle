@@ -87,6 +87,22 @@ class EgovChatSessionServiceImplRagStripTest {
     }
 
     @Test
+    @DisplayName("첨부 이미지가 있는 USER 메시지는 imageBase64/imageMimeType이 함께 반환된다")
+    void includesImageDataWhenPresent() {
+        ChatMemoryEntity entity = new ChatMemoryEntity("session-6", "USER", "이거 뭐야?\n[이미지 첨부됨]");
+        entity.setImageBase64("YWJj");
+        entity.setImageMimeType("image/png");
+        entity.setCreatedAt(LocalDateTime.now());
+        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(eq("session-6")))
+                .thenReturn(List.of(entity));
+
+        List<ChatMessageDto> result = service.getSessionMessages("session-6");
+
+        assertThat(result.get(0).getImageBase64()).isEqualTo("YWJj");
+        assertThat(result.get(0).getImageMimeType()).isEqualTo("image/png");
+    }
+
+    @Test
     @DisplayName("SYSTEM 메시지는 필터링되어 반환되지 않는다")
     void filtersOutSystemMessage() {
         ChatMemoryEntity entity = new ChatMemoryEntity("session-4", "SYSTEM", "시스템 프롬프트");

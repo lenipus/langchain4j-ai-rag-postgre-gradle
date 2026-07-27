@@ -2,14 +2,22 @@ package com.example.chat.controller;
 
 import com.example.chat.context.SessionContext;
 import com.example.chat.dto.ChatMessageDto;
+import com.example.chat.dto.ImageAttachmentRequestDto;
+import com.example.chat.dto.ImageAttachmentResponseDto;
 import com.example.chat.dto.StreamTokenDto;
 import com.example.chat.service.EgovChatService;
 import com.example.chat.service.EgovChatSessionService;
+import com.example.chat.service.PendingImageStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -21,6 +29,24 @@ public class EgovChatController {
 
     private final EgovChatService egovChatService;
     private final EgovChatSessionService egovChatSessionService;
+    private final PendingImageStore pendingImageStore;
+
+    // false면 업로드 엔드포인트 자체를 막는다(프런트 UI를 우회해 직접 호출해도 안전).
+    @Value("${chat.image-attachment.enabled:true}")
+    private boolean imageAttachmentEnabled;
+
+    /**
+     * 이미지 첨부 업로드 - base64 이미지는 스트리밍(EventSource, GET) 요청 URL에 실어보내기엔
+     * 너무 크므로, 먼저 여기 업로드해 토큰만 받고 스트리밍 요청에는 그 토큰만 실어보낸다.
+     */
+    @PostMapping("/api/chat/attach-image")
+    public ImageAttachmentResponseDto attachImage(@RequestBody ImageAttachmentRequestDto request) {
+        if (!imageAttachmentEnabled) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "이미지 첨부 기능이 비활성화되어 있습니다.");
+        }
+        String token = pendingImageStore.store(request.base64Data(), request.mimeType());
+        return new ImageAttachmentResponseDto(token);
+    }
 
     /**
      * RAG 기반 스트리밍 응답 생성
@@ -29,7 +55,8 @@ public class EgovChatController {
     public Flux<StreamTokenDto> streamRagResponse(
             @RequestParam(value = "message", defaultValue = "Tell me about this document") String message,
             @RequestParam(value = "model", required = false) String model,
-            @RequestParam(value = "sessionId", required = false) String sessionId) {
+            @RequestParam(value = "sessionId", required = false) String sessionId,
+            @RequestParam(value = "imageToken", required = false) String imageToken) {
         log.info("RAG 기반 스트리밍 질의 수신: {}, 모델: {}, 세션: {}", message, model, sessionId);
 
         bootstrapSession(sessionId, message);
@@ -38,7 +65,7 @@ public class EgovChatController {
         // 요청 스레드에서 ThreadLocal 세션 컨텍스트를 정리한다. 이전에는 doFinally
         // 안에서 정리했으나, doFinally는 reactor 스레드에서 실행되어 요청(서블릿)
         // 스레드의 ThreadLocal이 정리되지 않고 워커 스레드에 남는 문제가 있었다.
-        Flux<StreamTokenDto> response = egovChatService.streamRagResponse(message, model)
+        Flux<StreamTokenDto> response = egovChatService.streamRagResponse(message, model, imageToken)
                 .map(StreamTokenDto::new);
         SessionContext.clear();
         return response;
@@ -51,7 +78,8 @@ public class EgovChatController {
     public Flux<StreamTokenDto> streamSimpleResponse(
             @RequestParam(value = "message", defaultValue = "Tell me about this document") String message,
             @RequestParam(value = "model", required = false) String model,
-            @RequestParam(value = "sessionId", required = false) String sessionId) {
+            @RequestParam(value = "sessionId", required = false) String sessionId,
+            @RequestParam(value = "imageToken", required = false) String imageToken) {
         log.info("일반 스트리밍 질의 수신: {}, 모델: {}, 세션: {}", message, model, sessionId);
 
         bootstrapSession(sessionId, message);
@@ -60,7 +88,7 @@ public class EgovChatController {
         // 서비스가 sessionId를 동기적으로 읽어 처리하므로, 스트림을 반환하기 전
         // 요청 스레드에서 ThreadLocal 세션 컨텍스트를 정리한다.(doFinally는 reactor
         // 스레드에서 실행되어 요청 스레드의 ThreadLocal을 정리하지 못했다.)
-        Flux<StreamTokenDto> response = egovChatService.streamSimpleResponse(message, model)
+        Flux<StreamTokenDto> response = egovChatService.streamSimpleResponse(message, model, imageToken)
                 .map(StreamTokenDto::new);
         SessionContext.clear();
         return response;

@@ -19,6 +19,7 @@ class EgovChatServiceImplFriendlyErrorMessageTest {
 
     private final EgovChatServiceImpl service =
             new EgovChatServiceImpl(mock(com.example.chat.service.ChatbotFactory.class),
+                    mock(com.example.chat.service.PendingImageStore.class),
                     java.util.Optional.of(mock(com.example.sqlgen.service.SqlGenService.class)));
 
     @Test

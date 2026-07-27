@@ -14,6 +14,10 @@ public class ChatMessageDto {
     private String messageType; // USER, ASSISTANT, SYSTEM
     private String content;
 
+    // 첨부 이미지가 있었던 USER 메시지만 채워진다(없으면 둘 다 null).
+    private String imageBase64;
+    private String imageMimeType;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime timestamp;
 

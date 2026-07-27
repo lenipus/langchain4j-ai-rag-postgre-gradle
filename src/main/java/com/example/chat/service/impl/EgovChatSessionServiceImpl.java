@@ -90,6 +90,8 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                         "USER".equals(entity.getMessageType())
                                 ? stripInjectedContext(entity.getContent())
                                 : entity.getContent(),
+                        entity.getImageBase64(),
+                        entity.getImageMimeType(),
                         entity.getCreatedAt()))
                 .collect(Collectors.toList());
     }

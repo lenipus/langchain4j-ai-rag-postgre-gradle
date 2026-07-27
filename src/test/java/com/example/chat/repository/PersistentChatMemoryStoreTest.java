@@ -4,6 +4,7 @@ import com.example.chat.entity.ChatMemoryEntity;
 import com.example.chat.service.SqlGenChatbot;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.UserMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -191,6 +192,23 @@ class PersistentChatMemoryStoreTest {
         assertThat(saved).hasSize(3);
         assertThat(saved.get(2).getContent()).isEqualTo("출장은 어떻게 신청해?");
         assertThat(saved.get(2).getTurnId()).isEqualTo("turn-B");
+    }
+
+    @Test
+    @DisplayName("이미지가 첨부된 사용자 메시지는 텍스트+마커와 함께 이미지 base64/mimeType도 저장된다")
+    void persistsImageDataWhenAttached() {
+        UserMessage messageWithImage = new UserMessage(
+                dev.langchain4j.data.message.TextContent.from("이거 뭐야?"),
+                new ImageContent("YWJj", "image/png"));
+
+        store.updateMessages("session-11", List.of(messageWithImage));
+
+        ArgumentCaptor<ChatMemoryEntity> captor = ArgumentCaptor.forClass(ChatMemoryEntity.class);
+        verify(chatMemoryRepository).save(captor.capture());
+        ChatMemoryEntity saved = captor.getValue();
+        assertThat(saved.getContent()).isEqualTo("이거 뭐야?\n[이미지 첨부됨]");
+        assertThat(saved.getImageBase64()).isEqualTo("YWJj");
+        assertThat(saved.getImageMimeType()).isEqualTo("image/png");
     }
 
     @Test

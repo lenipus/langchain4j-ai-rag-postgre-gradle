@@ -35,6 +35,10 @@ public class EgovWebController {
     @Value("${sqlgen.enabled:false}")
     private boolean sqlgenEnabled;
 
+    // false면 이미지 첨부(붙여넣기/드래그) UI 자체를 안 보여준다.
+    @Value("${chat.image-attachment.enabled:true}")
+    private boolean imageAttachmentEnabled;
+
     /**
      * 채팅 페이지 제공
      */
@@ -45,6 +49,7 @@ public class EgovWebController {
         model.addAttribute("allowedUploadExtensions", allowedUploadExtensions);
         model.addAttribute("activeProfile", resolveActiveProfile());
         model.addAttribute("sqlgenEnabled", sqlgenEnabled);
+        model.addAttribute("imageAttachmentEnabled", imageAttachmentEnabled);
         return "chat";
     }
 

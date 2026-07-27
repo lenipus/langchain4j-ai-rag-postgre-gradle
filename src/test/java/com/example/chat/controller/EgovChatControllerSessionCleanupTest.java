@@ -3,6 +3,7 @@ package com.example.chat.controller;
 import com.example.chat.context.SessionContext;
 import com.example.chat.service.EgovChatService;
 import com.example.chat.service.EgovChatSessionService;
+import com.example.chat.service.PendingImageStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,8 @@ class EgovChatControllerSessionCleanupTest {
 
     private final EgovChatService chatService = mock(EgovChatService.class);
     private final EgovChatSessionService sessionService = mock(EgovChatSessionService.class);
-    private final EgovChatController controller = new EgovChatController(chatService, sessionService);
+    private final PendingImageStore pendingImageStore = mock(PendingImageStore.class);
+    private final EgovChatController controller = new EgovChatController(chatService, sessionService, pendingImageStore);
 
     @AfterEach
     void tearDown() {
@@ -45,9 +47,9 @@ class EgovChatControllerSessionCleanupTest {
         when(sessionService.sessionExists("s-1")).thenReturn(true);
         when(sessionService.getSessionMessages("s-1")).thenReturn(Collections.emptyList());
         when(sessionService.generateSessionTitle(anyString())).thenReturn("title");
-        when(chatService.streamRagResponse(anyString(), any())).thenReturn(Flux.<String>empty());
+        when(chatService.streamRagResponse(anyString(), any(), any())).thenReturn(Flux.<String>empty());
 
-        controller.streamRagResponse("hello", null, "s-1");
+        controller.streamRagResponse("hello", null, "s-1", null);
 
         // 정리되면 ThreadLocal이 비어 기본 세션 ID가 반환된다.
         // 정리되지 않았다면(버그) "s-1"이 남아 단언이 실패한다.
@@ -62,9 +64,9 @@ class EgovChatControllerSessionCleanupTest {
         when(sessionService.sessionExists("s-2")).thenReturn(true);
         when(sessionService.getSessionMessages("s-2")).thenReturn(Collections.emptyList());
         when(sessionService.generateSessionTitle(anyString())).thenReturn("title");
-        when(chatService.streamSimpleResponse(anyString(), any())).thenReturn(Flux.<String>empty());
+        when(chatService.streamSimpleResponse(anyString(), any(), any())).thenReturn(Flux.<String>empty());
 
-        controller.streamSimpleResponse("hi", null, "s-2");
+        controller.streamSimpleResponse("hi", null, "s-2", null);
 
         assertThat(SessionContext.getCurrentSessionId())
                 .isEqualTo(SessionContext.DEFAULT_CONVERSATION_ID);

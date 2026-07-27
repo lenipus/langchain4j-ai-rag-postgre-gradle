@@ -20,7 +20,8 @@ import static org.mockito.Mockito.mock;
 class EgovChatServiceImplSqlGenDisabledTest {
 
     private final EgovChatServiceImpl service =
-            new EgovChatServiceImpl(mock(com.example.chat.service.ChatbotFactory.class), Optional.empty());
+            new EgovChatServiceImpl(mock(com.example.chat.service.ChatbotFactory.class),
+                    mock(com.example.chat.service.PendingImageStore.class), Optional.empty());
 
     @AfterEach
     void clearSessionContext() {

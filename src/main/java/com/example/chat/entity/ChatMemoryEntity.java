@@ -39,6 +39,17 @@ public class ChatMemoryEntity {
     @Column(name = "turn_id", length = 36)
     private String turnId;
 
+    /**
+     * 첨부 이미지(있는 경우만). 새로고침해도 화면에 다시 보이도록 그대로 저장하지만,
+     * 채팅 메모리를 다시 불러와 LLM에 넘길 때는(getMessages) 과거 턴 컨텍스트가 계속
+     * 불어나는 걸 막기 위해 이 값을 다시 실어보내지 않는다 - 화면 표시 전용이다.
+     */
+    @Column(name = "image_base64", columnDefinition = "TEXT")
+    private String imageBase64;
+
+    @Column(name = "image_mime_type", length = 100)
+    private String imageMimeType;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

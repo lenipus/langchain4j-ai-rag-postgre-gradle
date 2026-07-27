@@ -4,7 +4,10 @@ import com.example.chat.entity.ChatMemoryEntity;
 import com.example.chat.service.SqlGenChatbot;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.RequiredArgsConstructor;
@@ -187,10 +190,13 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message, boolean isLatest, String turnId) {
         String messageType;
         String content;
+        ImageContent image = null;
 
         if (message instanceof UserMessage userMessage) {
             messageType = "USER";
-            content = isLatest ? userMessage.singleText() : stripInjectedContext(userMessage.singleText());
+            UserMessageParts parts = extractParts(userMessage);
+            content = isLatest ? parts.text() : stripInjectedContext(parts.text());
+            image = parts.image();
         } else if (message instanceof AiMessage aiMessage) {
             messageType = "ASSISTANT";
             content = aiMessage.text();
@@ -204,7 +210,44 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
 
         ChatMemoryEntity entity = new ChatMemoryEntity(sessionId, messageType, content);
         entity.setTurnId(turnId);
+        if (image != null) {
+            entity.setImageBase64(image.image().base64Data());
+            entity.setImageMimeType(image.image().mimeType());
+        }
         return entity;
+    }
+
+    /** 첨부 이미지가 있었음을 텍스트에도 남기는 마커(과거 턴 텍스트 로그·검색용). */
+    private static final String IMAGE_ATTACHED_MARKER = "\n[이미지 첨부됨]";
+
+    private record UserMessageParts(String text, ImageContent image) {
+    }
+
+    /**
+     * UserMessage에서 텍스트와 첨부 이미지를 뽑는다. 텍스트 하나뿐인 일반 메시지는
+     * {@link UserMessage#singleText()}가 되지만, 이미지가 같이 첨부된 메시지는 Content가
+     * 2개(텍스트+이미지)라 그게 예외를 던진다 - 이미지가 섞여 있어도 텍스트/이미지를 각각
+     * 골라낸다. 이미지는 {@code getMessages()}로 다시 불러올 땐 재구성하지 않으므로(과거
+     * 턴 컨텍스트가 계속 불어나는 걸 막기 위해) 여기 들어오는 image는 항상 방금 막
+     * add()된 현재 턴의 것뿐이다.
+     */
+    private UserMessageParts extractParts(UserMessage userMessage) {
+        if (userMessage.hasSingleText()) {
+            return new UserMessageParts(userMessage.singleText(), null);
+        }
+        StringBuilder text = new StringBuilder();
+        ImageContent image = null;
+        for (Content content : userMessage.contents()) {
+            if (content instanceof TextContent textContent) {
+                text.append(textContent.text());
+            } else if (content instanceof ImageContent imageContent) {
+                image = imageContent;
+            }
+        }
+        if (image != null) {
+            text.append(IMAGE_ATTACHED_MARKER);
+        }
+        return new UserMessageParts(text.toString(), image);
     }
 
     /** RAG 삽입 마커와 SQL 생성 스키마 컨텍스트 마커 중 먼저 나오는 위치에서 잘라낸다. */

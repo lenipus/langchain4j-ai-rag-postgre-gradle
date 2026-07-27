@@ -1,5 +1,6 @@
 package com.example.chat.service;
 
+import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import reactor.core.publisher.Flux;
@@ -31,6 +32,16 @@ public interface SimpleChatbot {
      */
     @SystemMessage(SIMPLE_SYSTEM_PROMPT)
     Flux<String> streamChat(@UserMessage String query);
+
+    /**
+     * 이미지가 첨부된 질문에 대한 스트리밍 채팅 응답 생성 (비전 지원 모델 전용)
+     *
+     * @param query 사용자 질문
+     * @param image 첨부 이미지
+     * @return Flux<String> (리액티브 스트리밍 응답)
+     */
+    @SystemMessage(SIMPLE_SYSTEM_PROMPT)
+    Flux<String> streamChat(@UserMessage String query, @UserMessage ImageContent image);
 
     /**
      * 일반 채팅 응답 생성 (비스트리밍)

@@ -3,13 +3,16 @@ package com.example.chat.service.impl;
 import com.example.chat.context.SessionContext;
 import com.example.chat.service.EgovChatService;
 import com.example.chat.service.ChatbotFactory;
+import com.example.chat.service.PendingImageStore;
 import com.example.chat.service.RagChatbot;
 import com.example.chat.service.SimpleChatbot;
 import com.example.chat.service.SqlGenChatbot;
 import com.example.sqlgen.service.SqlGenService;
+import dev.langchain4j.data.message.ImageContent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -34,11 +37,16 @@ import java.util.regex.Pattern;
 public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements EgovChatService {
 
     private final ChatbotFactory chatbotFactory;
+    private final PendingImageStore pendingImageStore;
 
     // sqlgen.enabled=false면 SqlGenServiceImpl 빈 자체가 안 만들어지므로(SqlGenPasswordEncryptor의
     // 암호화 키 미설정 때문에 앱 구동이 실패하지 않도록), Optional로 받아 없으면 SQL 생성
     // 요청 시 안내 메시지로 처리한다 (streamSqlGenResponse 참고).
     private final Optional<SqlGenService> sqlGenService;
+
+    // false면 프런트가 imageToken을 보내도 무시한다(프런트 UI를 우회해 직접 호출해도 안전).
+    @Value("${chat.image-attachment.enabled:true}")
+    private boolean imageAttachmentEnabled;
 
     /**
      * 세션별 RAG 기반 스트리밍 응답 생성
@@ -47,7 +55,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      * - langchain4j-reactor가 Flux 변환 자동 처리
      */
     @Override
-    public Flux<String> streamRagResponse(String query, String model) {
+    public Flux<String> streamRagResponse(String query, String model, String imageToken) {
         String sessionId = SessionContext.getCurrentSessionId();
         long startTime = System.currentTimeMillis();
         log.info("RAG 스트리밍 질의 시작 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
@@ -55,13 +63,17 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         try {
             validateSessionId(sessionId);
 
+            ImageContent image = resolveImageContent(imageToken);
             AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
             AtomicLong answerLength = new AtomicLong(0);
 
             // RAG 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
             return withMemoryConflictRetry(() -> {
                 RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId);
-                return ragChatbot.streamChat(query)
+                Flux<String> stream = image != null
+                        ? ragChatbot.streamChat(query, image)
+                        : ragChatbot.streamChat(query);
+                return stream
                         .doOnNext(chunk -> {
                             answerLength.addAndGet(chunk.length());
                             if (firstChunkReceived.compareAndSet(false, true)) {
@@ -90,7 +102,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      * langchain4j-reactor가 Flux 변환 자동 처리
      */
     @Override
-    public Flux<String> streamSimpleResponse(String query, String model) {
+    public Flux<String> streamSimpleResponse(String query, String model, String imageToken) {
         String sessionId = SessionContext.getCurrentSessionId();
         long startTime = System.currentTimeMillis();
         log.info("Simple 스트리밍 질의 시작 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
@@ -98,13 +110,17 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         try {
             validateSessionId(sessionId);
 
+            ImageContent image = resolveImageContent(imageToken);
             AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
             AtomicLong answerLength = new AtomicLong(0);
 
             // Simple 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
             return withMemoryConflictRetry(() -> {
                 SimpleChatbot simpleChatbot = chatbotFactory.createSimpleChatbot(model, sessionId);
-                return simpleChatbot.streamChat(query)
+                Flux<String> stream = image != null
+                        ? simpleChatbot.streamChat(query, image)
+                        : simpleChatbot.streamChat(query);
+                return stream
                         .doOnNext(chunk -> {
                             answerLength.addAndGet(chunk.length());
                             if (firstChunkReceived.compareAndSet(false, true)) {
@@ -206,6 +222,17 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
             log.error("Simple 응답 생성 중 오류", e);
             return handleException(e);
         }
+    }
+
+    /** imageToken을 1회성으로 소비해 ImageContent로 변환한다. 없거나 만료됐으면 null. */
+    // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
+    ImageContent resolveImageContent(String imageToken) {
+        if (!imageAttachmentEnabled || imageToken == null || imageToken.isBlank()) {
+            return null;
+        }
+        return pendingImageStore.takeAndRemove(imageToken)
+                .map(attachment -> new ImageContent(attachment.base64Data(), attachment.mimeType()))
+                .orElse(null);
     }
 
     /**

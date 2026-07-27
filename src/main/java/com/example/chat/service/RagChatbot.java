@@ -1,5 +1,6 @@
 package com.example.chat.service;
 
+import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import reactor.core.publisher.Flux;
@@ -18,6 +19,8 @@ public interface RagChatbot {
             사용자의 질문에 대해 제공된 문서 내용을 기반으로 정확하고 도움이 되는 답변을 제공하세요.
             제공된 문서에 관련 정보가 없는 경우, 그 사실을 먼저 명확히 알린 뒤,
             일반적인 지식을 바탕으로 답변하세요. 이때 문서 기반 답변과 일반 지식 기반 답변을 구분해서 표현하세요.
+            이미지가 첨부된 질문인데 제공된 문서가 그 이미지 내용과 관련이 없어 보이면, 문서 내용에
+            억지로 답을 끼워맞추지 말고 이미지를 직접 보고 답변하세요.
             답변은 한국어로, 격식 있고 공식적인 문어체로 작성하세요.
             """;
 
@@ -31,6 +34,16 @@ public interface RagChatbot {
      */
     @SystemMessage(RAG_SYSTEM_PROMPT)
     Flux<String> streamChat(@UserMessage String query);
+
+    /**
+     * 이미지가 첨부된 질문에 대한 RAG 기반 스트리밍 채팅 응답 생성 (비전 지원 모델 전용)
+     *
+     * @param query 사용자 질문
+     * @param image 첨부 이미지
+     * @return Flux<String> (리액티브 스트리밍 응답)
+     */
+    @SystemMessage(RAG_SYSTEM_PROMPT)
+    Flux<String> streamChat(@UserMessage String query, @UserMessage ImageContent image);
 
     /**
      * RAG 기반 채팅 응답 생성 (비스트리밍)

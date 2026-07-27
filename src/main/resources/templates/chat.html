@@ -201,8 +201,14 @@
             </button>
         </div>
 
+        <div class="image-attachment-preview" id="image-attachment-preview" th:if="${imageAttachmentEnabled}" style="display:none;">
+            <img id="image-attachment-thumbnail" src="" alt="첨부 이미지 미리보기">
+            <button type="button" class="image-attachment-remove-btn" onclick="clearImageAttachment()" title="첨부 취소">×</button>
+        </div>
+
         <div class="input-container">
-            <textarea class="message-input" id="message-input" rows="1" placeholder="메시지를 입력하세요..." onkeydown="handleKeyPress(event)" oninput="autoGrowMessageInput(event)"></textarea>
+            <textarea class="message-input" id="message-input" rows="1" th:placeholder="'메시지를 입력하세요...'"
+                      onkeydown="handleKeyPress(event)" oninput="autoGrowMessageInput(event)" onpaste="handleMessageInputPaste(event)" ondragover="handleMessageInputDragOver(event)" ondrop="handleMessageInputDrop(event)"></textarea>
             <button class="send-button" id="send-btn" onclick="handleSendButtonClick()">전송</button>
         </div>
     </div>
@@ -225,6 +231,9 @@
         let selectedModel = ''; // 선택된 모델
         let currentSessionId = null; // 현재 선택된 세션 ID
         let sessions = new Map(); // 세션 정보를 저장하는 Map
+        // 클립보드로 붙여넣은 첨부 이미지. { base64Data, mimeType, dataUrl } 또는 null.
+        // 비전 지원 모델일 때만 의미가 있고, 전송하면 바로 비워진다.
+        let pendingImage = null;
 
         // ===== SQL 생성 모드 상태 (기존 /sqlgen 페이지에서 그대로 이식) =====
         const DEFAULT_PORTS = { postgresql: '5432', mariadb: '3306', oracle: '1521' };
@@ -347,6 +356,12 @@
                         if (content && content.trim() !== '') {
                             lastMessageDiv = addMessage(content, isUser);
                             lastMessageIsUser = isUser;
+                            if (isUser && message.imageBase64) {
+                                const thumb = document.createElement('img');
+                                thumb.src = 'data:' + (message.imageMimeType || 'image/png') + ';base64,' + message.imageBase64;
+                                thumb.className = 'sent-image-thumbnail';
+                                lastMessageDiv.appendChild(thumb);
+                            }
                         } else {
                             console.warn(`빈 메시지 건너뜀:`, message);
                         }
@@ -988,6 +1003,67 @@
             }
         }
 
+        // 이미지 파일 하나를 읽어 pendingImage로 등록하고 미리보기를 띄운다.
+        // 붙여넣기(paste)와 드래그앤드롭(drop) 둘 다 이 함수로 처리를 모은다.
+        function attachImageFile(file) {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const dataUrl = reader.result;
+                const base64Data = dataUrl.substring(dataUrl.indexOf(',') + 1);
+                pendingImage = { base64Data: base64Data, mimeType: file.type, dataUrl: dataUrl };
+                showImageAttachmentPreview(dataUrl);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 메시지 입력창에 이미지를 붙여넣으면(Ctrl+V) 클립보드에서 바로 첨부한다. 텍스트를
+        // 붙여넣는 평소 동작은 그대로 두고, 이미지가 있을 때만 가로챈다.
+        function handleMessageInputPaste(event) {
+            const items = event.clipboardData && event.clipboardData.items;
+            if (!items) {
+                return;
+            }
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (!file) {
+                        continue;
+                    }
+                    attachImageFile(file);
+                    event.preventDefault();
+                    return;
+                }
+            }
+        }
+
+        // 이미지 파일을 입력창으로 드래그앤드롭해도 붙여넣기와 동일하게 첨부한다.
+        function handleMessageInputDragOver(event) {
+            event.preventDefault();
+        }
+
+        function handleMessageInputDrop(event) {
+            event.preventDefault();
+            const files = event.dataTransfer && event.dataTransfer.files;
+            if (!files || files.length === 0) {
+                return;
+            }
+            const imageFile = Array.from(files).find(f => f.type.startsWith('image/'));
+            if (imageFile) {
+                attachImageFile(imageFile);
+            }
+        }
+
+        function showImageAttachmentPreview(dataUrl) {
+            document.getElementById('image-attachment-thumbnail').src = dataUrl;
+            document.getElementById('image-attachment-preview').style.display = 'flex';
+        }
+
+        function clearImageAttachment() {
+            pendingImage = null;
+            document.getElementById('image-attachment-preview').style.display = 'none';
+            document.getElementById('image-attachment-thumbnail').src = '';
+        }
+
         function sendMessage() {
             // 응답이 아직 스트리밍 중이면(전송 버튼이 "중지"로 바뀐 상태) 새 질문을 못 보낸다.
             // 버튼 클릭은 handleSendButtonClick()이 위에서 걸러주지만, Enter 키는 버튼 상태와
@@ -1028,8 +1104,18 @@
                 }
             }
 
-            // 사용자 메시지 추가
+            // 전송 시점의 첨부 이미지를 스냅샷으로 남기고 입력창 쪽 상태는 바로 비운다.
+            const attachedImage = pendingImage;
+            clearImageAttachment();
+
+            // 사용자 메시지 추가 (첨부 이미지가 있으면 질문 버블 안에 썸네일도 같이 보여준다)
             const userMessageDiv = addMessage(message, true);
+            if (attachedImage) {
+                const thumb = document.createElement('img');
+                thumb.src = attachedImage.dataUrl;
+                thumb.className = 'sent-image-thumbnail';
+                userMessageDiv.appendChild(thumb);
+            }
             input.value = '';
             input.style.height = 'auto';
 
@@ -1050,7 +1136,10 @@
                 sessionId: currentSessionId,
                 connectionId: currentMode === 'sqlgen' ? sqlGenConnectionId : null,
                 tableNames: currentMode === 'sqlgen' ? Array.from(selectedTables) : null,
-                userMessageDiv: userMessageDiv
+                userMessageDiv: userMessageDiv,
+                // 업로드 토큰은 1회성이라 재시도 때 매번 새로 올려야 하므로, 토큰이 아니라
+                // 원본 base64/mimeType을 들고 있는다({base64Data, mimeType}, 없으면 null).
+                image: attachedImage ? { base64Data: attachedImage.base64Data, mimeType: attachedImage.mimeType } : null
             };
 
             streamAiResponse(requestParams, aiMessageDiv, sendBtn);
@@ -1059,7 +1148,30 @@
         // sendMessage()의 최초 전송과 오류 후 "재시도" 버튼 클릭 모두 이 함수를 통해
         // 스트리밍을 시작한다 - aiMessageDiv를 새로 만들지 않고 재사용해 같은 자리에서
         // 다시 응답을 받는다.
+        //
+        // requestParams.image(첨부 이미지)가 있으면, base64를 그대로 스트리밍 URL에 실어보낼
+        // 수 없어서(EventSource는 GET만 지원, base64는 URL 길이 제한을 넘기 쉬움) 먼저
+        // /api/chat/attach-image로 업로드해 토큰만 받아온 뒤 실제 스트리밍을 시작한다. 토큰은
+        // 1회성이라 재시도 때도 매번 새로 업로드한다(requestParams.image에 원본을 그대로 남겨둠).
         function streamAiResponse(requestParams, aiMessageDiv, sendBtn) {
+            if (!requestParams.image) {
+                startStreamingWithImageToken(requestParams, aiMessageDiv, sendBtn, null);
+                return;
+            }
+            fetch('/api/chat/attach-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestParams.image)
+            })
+                .then(response => response.json())
+                .then(data => startStreamingWithImageToken(requestParams, aiMessageDiv, sendBtn, data.imageToken))
+                .catch(error => {
+                    console.error('이미지 업로드 실패:', error);
+                    startStreamingWithImageToken(requestParams, aiMessageDiv, sendBtn, null);
+                });
+        }
+
+        function startStreamingWithImageToken(requestParams, aiMessageDiv, sendBtn, imageToken) {
             // 버튼을 비활성화하지 않고 "중지"로 바꾼다 - 새 질문 전송은 activeStreamController
             // 체크로 막되, 버튼 자체는 눌러서 지금 응답을 중간에 끊을 수 있게 살려둔다.
             sendBtn.disabled = false;
@@ -1089,6 +1201,9 @@
             if (requestParams.mode === 'sqlgen') {
                 params.append('connectionId', requestParams.connectionId);
                 requestParams.tableNames.forEach(tableName => params.append('tableNames', tableName));
+            }
+            if (imageToken) {
+                params.append('imageToken', imageToken);
             }
 
             // 세션 ID 확인 및 로깅

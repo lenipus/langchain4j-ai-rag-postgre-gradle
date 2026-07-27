@@ -316,6 +316,36 @@ h1 {
 .retry-icon-btn:hover {
     background-color: #fdecea;
 }
+.image-attachment-preview {
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+.image-attachment-preview img {
+    max-height: 60px;
+    max-width: 100px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    object-fit: cover;
+}
+.image-attachment-remove-btn {
+    width: 22px;
+    height: 22px;
+    border: 1px solid #ced4da;
+    border-radius: 50%;
+    background-color: white;
+    color: #6c757d;
+    cursor: pointer;
+    line-height: 1;
+}
+.sent-image-thumbnail {
+    display: block;
+    max-width: 200px;
+    max-height: 150px;
+    border-radius: 4px;
+    margin-top: 6px;
+    object-fit: cover;
+}
 .input-container {
     display: flex;
     align-items: flex-end;
