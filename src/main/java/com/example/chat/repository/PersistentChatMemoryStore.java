@@ -146,6 +146,37 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     }
 
     /**
+     * 이전 시도가 응답 없이 실패해서(예: 503) 사용자 메시지만 저장되고 AI 메시지가
+     * 못 붙은 채로 남아있는 경우, 그 꼬리에 매달린 USER 메시지(들)를 정리한다.
+     *
+     * <p>{@code ChatbotFactory}가 새 챗봇을 만들 때마다(최초 전송이든 "재시도" 버튼 클릭이든)
+     * 매번 호출한다. {@code MessageWindowChatMemory.add()}는 "현재 저장된 메시지를 읽고 →
+     * 새 메시지를 끝에 추가 → 다시 저장"하는 방식이라, 실패로 끝난 이전 시도의 사용자
+     * 메시지를 지우지 않고 재시도하면 같은 질문이 채팅 기록에 계속 중복으로 쌓인다(재시도할
+     * 때마다 1개씩 늘어남). 정상적으로 끝난 세션은 항상 마지막이 ASSISTANT 메시지이므로,
+     * 마지막이 USER인 경우에만(=직전 시도가 실패한 경우에만) 정리 대상이 된다.</p>
+     *
+     * @param sessionId 세션 ID
+     */
+    @Transactional
+    public void deleteTrailingUserMessages(String sessionId) {
+        List<ChatMemoryEntity> existing = chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+
+        int cut = existing.size();
+        while (cut > 0 && "USER".equals(existing.get(cut - 1).getMessageType())) {
+            cut--;
+        }
+        if (cut == existing.size()) {
+            return;
+        }
+
+        for (int i = cut; i < existing.size(); i++) {
+            chatMemoryRepository.deleteById(existing.get(i).getId());
+        }
+        log.info("실패한 이전 시도로 남은 사용자 메시지 {}개 정리 - 세션: {}", existing.size() - cut, sessionId);
+    }
+
+    /**
      * Entity를 LangChain4j ChatMessage로 변환
      */
     private ChatMessage convertToLangChain4jMessage(ChatMemoryEntity entity) {

@@ -83,6 +83,10 @@ public class ChatbotFactory {
      * @return RagChatbot 인스턴스
      */
     public RagChatbot createRagChatbot(String modelName, String sessionId) {
+        // 직전 시도가 응답 없이 실패해(예: 503) 사용자 메시지만 남고 AI 메시지가 못 붙은
+        // 채로 있으면, 재시도 때 같은 질문이 또 add()돼서 채팅 기록에 중복 쌓이는 걸 막는다.
+        chatMemoryStore.deleteTrailingUserMessages(sessionId);
+
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
 
         // 이 질의(턴) 하나를 위한 키. rag_retrieval_logs와 chat_memory 양쪽에 같은 값이
@@ -146,6 +150,9 @@ public class ChatbotFactory {
      * @return SimpleChatbot 인스턴스
      */
     public SimpleChatbot createSimpleChatbot(String modelName, String sessionId) {
+        // 직전 시도가 응답 없이 실패해 사용자 메시지만 남아있으면(createRagChatbot 참고) 정리한다.
+        chatMemoryStore.deleteTrailingUserMessages(sessionId);
+
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
 
         log.info("Simple 챗봇 생성 - 모델: {}, 세션: {}", chatModelGateway.resolveModelName(modelName), sessionId);
@@ -164,6 +171,9 @@ public class ChatbotFactory {
      * @return SqlGenChatbot 인스턴스
      */
     public SqlGenChatbot createSqlGenChatbot(String modelName, String sessionId) {
+        // 직전 시도가 응답 없이 실패해 사용자 메시지만 남아있으면(createRagChatbot 참고) 정리한다.
+        chatMemoryStore.deleteTrailingUserMessages(sessionId);
+
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
 
         log.info("SQL 생성 챗봇 생성 - 모델: {}, 세션: {}", chatModelGateway.resolveModelName(modelName), sessionId);

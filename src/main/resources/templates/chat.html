@@ -169,6 +169,8 @@
                     <select id="model-select" class="model-select" onchange="onModelChange()">
                         <option value="">모델을 선택하세요...</option>
                     </select>
+                    <button type="button" id="model-refresh-btn" class="model-refresh-btn"
+                            onclick="loadOllamaModels()" title="모델 목록 새로고침">⟳</button>
                     <span id="model-status" class="model-status"></span>
                 </div>
             </div>
@@ -335,6 +337,9 @@
                 .then(messages => {
                     console.log(`서버에서 받은 메시지:`, messages);
 
+                    let lastMessageDiv = null;
+                    let lastMessageIsUser = false;
+
                     // 메시지들을 화면에 표시
                     messages.forEach((message, index) => {
                         console.log(`메시지 ${index}:`, message);
@@ -342,11 +347,22 @@
                         const content = message.content;
 
                         if (content && content.trim() !== '') {
-                            addMessage(content, isUser);
+                            lastMessageDiv = addMessage(content, isUser);
+                            lastMessageIsUser = isUser;
                         } else {
                             console.warn(`빈 메시지 건너뜀:`, message);
                         }
                     });
+
+                    // 마지막 메시지가 사용자 질문이면, 그 질문에 대한 응답을 못 받고 끝난
+                    // (예: 503) 이전 시도라는 뜻이다 - 다시 보낼 수 있는 재시도 아이콘을
+                    // 붙인다. 이 세션에 대한 스트림이 실제로 진행 중이면(다른 채팅을 보다가
+                    // 돌아온 경우) reattachActiveStreamIfNeeded가 대신 처리하므로 손대지 않는다.
+                    const hasLiveStreamForThisSession = activeStreamController
+                            && activeStreamController.sessionId === sessionId;
+                    if (lastMessageDiv && lastMessageIsUser && !hasLiveStreamForThisSession) {
+                        showRetryIconForDanglingQuestion(lastMessageDiv, sessionId);
+                    }
 
                     console.log(`세션 ${sessionId} 메시지 로드 완료: ${messages.length}개`);
                 })
@@ -368,6 +384,11 @@
          */
         function reattachActiveStreamIfNeeded(sessionId) {
             if (!activeStreamController || activeStreamController.sessionId !== sessionId) {
+                // 지금 보는 세션이 활성 스트림의 세션과 다르면(백그라운드에서 다른 세션이
+                // 스트리밍 중이거나 스트림이 아예 없음), 이전 세션에서 띄워뒀을 수 있는
+                // 점프 버튼을 여기 남겨두면 안 된다 - 안 그러면 지금 화면과 무관한 "답변을
+                // 기다리는 중" 안내가 경과 시간과 함께 계속 떠 있게 된다.
+                hideJumpToLatestButton();
                 return;
             }
 
@@ -391,6 +412,37 @@
             }
 
             chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        /**
+         * 세션 기록을 불러왔는데 마지막 메시지가 사용자 질문이면(=응답 없이 실패로 끝난
+         * 이전 시도), 그 질문 바로 아래에 재시도 아이콘을 다시 붙여준다. 그 질문을 원래
+         * 어떤 모델/모드로 보냈는지는 서버에 남아있지 않으므로, 지금 화면에 선택된
+         * 모델/모드로 다시 보낸다.
+         */
+        function showRetryIconForDanglingQuestion(userMessageDiv, sessionId) {
+            const sendBtn = document.getElementById('send-btn');
+            const chatContainer = document.getElementById('chat-container');
+            const aiMessageDiv = document.createElement('div');
+            aiMessageDiv.classList.add('message', 'ai-message');
+            aiMessageDiv.style.color = '#6c757d';
+            aiMessageDiv.style.fontStyle = 'italic';
+            aiMessageDiv.style.fontSize = '13px';
+            aiMessageDiv.textContent = '이 질문에 대한 응답을 받지 못했습니다.';
+            chatContainer.appendChild(aiMessageDiv);
+
+            const sqlGenConnectionId = document.getElementById('connection-select').value;
+            const requestParams = {
+                message: userMessageDiv.textContent,
+                mode: currentMode,
+                model: getSelectedModel(),
+                sessionId: sessionId,
+                connectionId: currentMode === 'sqlgen' ? sqlGenConnectionId : null,
+                tableNames: currentMode === 'sqlgen' ? Array.from(selectedTables) : null,
+                userMessageDiv: userMessageDiv
+            };
+
+            appendRetryButton(requestParams, aiMessageDiv, sendBtn);
         }
 
         /**
@@ -574,9 +626,15 @@
             const modelSelection = document.getElementById('model-selection');
             const modelSelect = document.getElementById('model-select');
             const modelStatus = document.getElementById('model-status');
+            const refreshBtn = document.getElementById('model-refresh-btn');
 
-            // 상태 초기화
-            modelStatus.textContent = '모델 목록을 불러오는 중...';
+            // 조회가 끝날 때까지(display:none 상태로 몇 초씩 아무것도 안 보이지 않도록) 영역을
+            // 바로 보여주고, 콤보박스는 "검색 중" 표시로 비활성화해둔다.
+            modelSelection.style.display = 'flex';
+            modelSelect.disabled = true;
+            modelSelect.innerHTML = '<option value="">모델 검색 중...</option>';
+            refreshBtn.disabled = true;
+            modelStatus.textContent = '';
             modelStatus.className = 'model-status';
 
             fetch('/api/ollama/models')
@@ -609,17 +667,13 @@
                             console.log('기본 모델이 없거나 목록에 없어 첫 번째 모델 선택됨:', selectedModel);
                         }
 
-                        // 모델 선택 영역 표시
-                        modelSelection.style.display = 'flex';
+                        modelSelect.disabled = false;
 
-                        // 상태 메시지 업데이트
+                        // 상태 메시지 업데이트 - 정상적으로 찾은 경우는 특별히 알려줄 내용이 없으니
+                        // 비워두고, 모델이 하나도 없을 때만(관리자가 조치해야 하는 상황) 안내한다.
                         if (availableModels.length > 0) {
-                            if (hasMatchingDefault) {
-                                modelStatus.textContent = `${availableModels.length}개 모델 발견 (기본: ${defaultModel})`;
-                            } else {
-                                modelStatus.textContent = `${availableModels.length}개 모델 발견 (기본 모델 미설정, ${selectedModel} 선택됨)`;
-                            }
-                            modelStatus.className = 'model-status success';
+                            modelStatus.textContent = '';
+                            modelStatus.className = 'model-status';
                         } else {
                             modelStatus.textContent = '설치된 모델이 없습니다';
                             modelStatus.className = 'model-status warning';
@@ -629,7 +683,6 @@
 
                     } else {
                         // Ollama 사용 불가능한 경우
-                        modelSelection.style.display = 'flex';
                         modelSelect.innerHTML = '<option value="">Ollama를 사용할 수 없습니다</option>';
                         modelSelect.disabled = true;
 
@@ -638,13 +691,14 @@
 
                         console.warn('Ollama 사용 불가능:', data.message);
                     }
+                    refreshBtn.disabled = false;
                 })
                 .catch(error => {
                     console.error('모델 목록 로드 중 오류:', error);
 
-                    modelSelection.style.display = 'flex';
                     modelSelect.innerHTML = '<option value="">모델 목록 로드 실패</option>';
                     modelSelect.disabled = true;
+                    refreshBtn.disabled = false;
 
                     modelStatus.textContent = '모델 목록을 불러오는 중 오류가 발생했습니다';
                     modelStatus.className = 'model-status error';
@@ -807,6 +861,7 @@
 
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
+            return messageDiv;
         }
 
         // marked.js가 렌더링한 <pre> 코드블록(예: SQL 생성 모드의 ```sql 결과)마다 작은 복사
@@ -976,7 +1031,7 @@
             }
 
             // 사용자 메시지 추가
-            addMessage(message, true);
+            const userMessageDiv = addMessage(message, true);
             input.value = '';
             input.style.height = 'auto';
 
@@ -989,13 +1044,15 @@
             // 재시도 시에도 그대로 재사용할 수 있도록, 이번 요청에 필요한 값을 전부
             // 스냅샷으로 남겨둔다 - 재시도 시점엔 모델 선택/테이블 선택이 바뀌어 있을 수
             // 있으므로 "다시 보내기"는 항상 처음 보낸 그대로의 질의를 재현해야 한다.
+            // userMessageDiv는 재시도 아이콘을 이 질문 바로 아래에 붙이기 위해 같이 들고 있는다.
             const requestParams = {
                 message: message,
                 mode: currentMode,
                 model: selectedModel,
                 sessionId: currentSessionId,
                 connectionId: currentMode === 'sqlgen' ? sqlGenConnectionId : null,
-                tableNames: currentMode === 'sqlgen' ? Array.from(selectedTables) : null
+                tableNames: currentMode === 'sqlgen' ? Array.from(selectedTables) : null,
+                userMessageDiv: userMessageDiv
             };
 
             streamAiResponse(requestParams, aiMessageDiv, sendBtn);
@@ -1200,10 +1257,15 @@
                 finishStreaming();
 
                 // 응답을 하나도 못 받은 경우(연결 문제 등) - 같은 질의를 다시 보낼 수 있는
-                // 재시도 버튼을 보여준다. 부분 응답이라도 받은 경우는 그 응답을 그대로 두고
-                // 세션 목록만 새로고침한다(실패로 취급하지 않음).
+                // 재시도 버튼을 보여준다. 백엔드가 본문에 "[오류: ...]" 친화적 메시지를 실어
+                // 보낸 뒤 연결이 끊긴 경우(예: 원본 오류 본문에 개행이 섞여 SSE 프레이밍이
+                // 깨지는 경우)도 실패로 취급해 재시도 버튼을 붙인다. 그 외 진짜 부분 응답을
+                // 받은 경우만 그대로 두고 세션 목록만 새로고침한다(실패로 취급하지 않음).
                 if (!fullResponse) {
                     showRetryableError(targetDiv, requestParams, sendBtn);
+                } else if (fullResponse.includes('[오류: ')) {
+                    enhanceCodeBlocks(targetDiv);
+                    appendRetryButton(requestParams, targetDiv, sendBtn);
                 } else {
                     enhanceCodeBlocks(targetDiv);
                     refreshSessionsList();
@@ -1234,7 +1296,7 @@
                 // EventSource.onerror가 아니라 이 정상 완료 경로로 온다 - 이미 렌더링된 메시지는
                 // 그대로 두고 재시도 버튼만 덧붙인다.
                 if (fullResponse.includes('[오류: ')) {
-                    appendRetryButton(targetDiv, requestParams, sendBtn);
+                    appendRetryButton(requestParams, targetDiv, sendBtn);
                 }
 
                 // 응답 완료 후 세션 목록 새로고침 (제목 업데이트 반영)
@@ -1243,7 +1305,7 @@
         }
 
         // 연결 문제 등으로 응답을 하나도 못 받았을 때, 같은 질의를 다시 보낼 수 있는
-        // 오류 메시지 + 재시도 버튼을 aiMessageDiv 안에 그린다.
+        // 오류 메시지 + 재시도 아이콘을 보여준다. 오류 메시지 자체는 aiMessageDiv 안에 그린다.
         function showRetryableError(aiMessageDiv, requestParams, sendBtn) {
             aiMessageDiv.innerHTML = '';
 
@@ -1253,18 +1315,39 @@
             errorText.textContent = '응답 생성 중 오류가 발생했습니다. 네트워크 연결을 확인해 주세요.';
             aiMessageDiv.appendChild(errorText);
 
-            appendRetryButton(aiMessageDiv, requestParams, sendBtn);
+            appendRetryButton(requestParams, aiMessageDiv, sendBtn);
         }
 
-        // 스트림은 정상 종료됐지만 백엔드가 본문에 "[오류: ...]" 친화적 메시지를 흘려보낸
-        // 경우, 이미 렌더링된 메시지 내용은 그대로 두고 재시도 버튼만 아래에 덧붙인다.
-        function appendRetryButton(aiMessageDiv, requestParams, sendBtn) {
+        // 재시도 아이콘(⟳)을 오류가 난 답변 안이 아니라, 그 질문(사용자 메시지 버블) 바로
+        // 아래에 붙인다 - "이 질문에 대한 응답이 실패했으니 다시 보낸다"는 느낌을 주기 위해서다.
+        // requestParams.userMessageDiv가 그 질문 버블 참조를 들고 있다.
+        function appendRetryButton(requestParams, aiMessageDiv, sendBtn) {
+            const userMessageDiv = requestParams.userMessageDiv;
+            if (!userMessageDiv) {
+                return;
+            }
+
+            // 재시도가 다시 실패해 또 붙이려 할 때, 먼저 붙여둔 아이콘이 남아있으면 치운다.
+            const existing = userMessageDiv.nextElementSibling;
+            if (existing && existing.classList.contains('retry-icon-wrap')) {
+                existing.remove();
+            }
+
+            const wrap = document.createElement('div');
+            wrap.className = 'retry-icon-wrap';
+
             const retryBtn = document.createElement('button');
             retryBtn.type = 'button';
-            retryBtn.className = 'retry-btn';
-            retryBtn.textContent = '재시도';
-            retryBtn.onclick = () => streamAiResponse(requestParams, aiMessageDiv, sendBtn);
-            aiMessageDiv.appendChild(retryBtn);
+            retryBtn.className = 'retry-icon-btn';
+            retryBtn.title = '이 질문 다시 보내기';
+            retryBtn.textContent = '⟳';
+            retryBtn.onclick = () => {
+                wrap.remove();
+                streamAiResponse(requestParams, aiMessageDiv, sendBtn);
+            };
+
+            wrap.appendChild(retryBtn);
+            userMessageDiv.insertAdjacentElement('afterend', wrap);
         }
 
         function reindexDocuments() {

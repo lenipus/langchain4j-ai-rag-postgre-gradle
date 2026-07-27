@@ -38,7 +38,7 @@ document:
 rag:
   similarity:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
-  top-k: 3
+  top-k: 5
 
   query-compression:
     enabled: true

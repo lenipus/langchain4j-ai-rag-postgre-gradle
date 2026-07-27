@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -163,5 +164,53 @@ class PersistentChatMemoryStoreTest {
         List<ChatMemoryEntity> saved = captor.getAllValues();
         assertThat(saved.get(0).getTurnId()).isEqualTo("turn-A"); // 과거 저장분 turnId 유지
         assertThat(saved.get(1).getTurnId()).isEqualTo("turn-A"); // 새로 추가된 AI 메시지도 같은 turnId
+    }
+
+    @Test
+    @DisplayName("마지막이 USER면(직전 시도가 응답 없이 실패) 그 꼬리에 매달린 USER 메시지(들)를 지운다")
+    void deletesTrailingUserMessagesAfterFailedAttempt() {
+        ChatMemoryEntity oldUser = new ChatMemoryEntity("session-8", "USER", "겸직허가 규정 좀 알려줘");
+        oldUser.setId(1L);
+        ChatMemoryEntity oldAi = new ChatMemoryEntity("session-8", "ASSISTANT", "겸직허가는 사전 승인이 필요합니다.");
+        oldAi.setId(2L);
+        ChatMemoryEntity danglingUser1 = new ChatMemoryEntity("session-8", "USER", "출장은 어떻게 신청해?");
+        danglingUser1.setId(3L);
+        ChatMemoryEntity danglingUser2 = new ChatMemoryEntity("session-8", "USER", "출장은 어떻게 신청해?");
+        danglingUser2.setId(4L);
+        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-8"))
+                .thenReturn(List.of(oldUser, oldAi, danglingUser1, danglingUser2));
+
+        store.deleteTrailingUserMessages("session-8");
+
+        verify(chatMemoryRepository).deleteById(3L);
+        verify(chatMemoryRepository).deleteById(4L);
+        verify(chatMemoryRepository, never()).deleteById(1L);
+        verify(chatMemoryRepository, never()).deleteById(2L);
+    }
+
+    @Test
+    @DisplayName("마지막이 ASSISTANT면(정상 종료된 세션) 아무것도 지우지 않는다")
+    void doesNothingWhenLastMessageIsAssistant() {
+        ChatMemoryEntity user = new ChatMemoryEntity("session-9", "USER", "겸직허가 규정 좀 알려줘");
+        user.setId(1L);
+        ChatMemoryEntity ai = new ChatMemoryEntity("session-9", "ASSISTANT", "겸직허가는 사전 승인이 필요합니다.");
+        ai.setId(2L);
+        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-9"))
+                .thenReturn(List.of(user, ai));
+
+        store.deleteTrailingUserMessages("session-9");
+
+        verify(chatMemoryRepository, never()).deleteById(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("세션에 메시지가 하나도 없으면 아무것도 하지 않는다")
+    void doesNothingWhenSessionIsEmpty() {
+        when(chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc("session-10"))
+                .thenReturn(List.of());
+
+        store.deleteTrailingUserMessages("session-10");
+
+        verify(chatMemoryRepository, never()).deleteById(org.mockito.ArgumentMatchers.any());
     }
 }

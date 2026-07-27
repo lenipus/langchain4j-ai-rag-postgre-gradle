@@ -292,19 +292,24 @@ h1 {
 .code-copy-btn.copy-failed {
     background-color: #e74c3c;
 }
-.retry-btn {
-    display: block;
-    margin-top: 8px;
-    padding: 6px 14px;
-    background-color: #e74c3c;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
+/* 실패한 질문 바로 아래 붙는 재시도 아이콘 - 질문 버블이 오른쪽 정렬이라 아이콘도 같이 맞춘다. */
+.retry-icon-wrap {
+    display: flex;
+    justify-content: flex-end;
+    margin: 4px 0 8px 0;
 }
-.retry-btn:hover {
-    background-color: #c0392b;
+.retry-icon-btn {
+    padding: 4px 8px;
+    border: 1px solid #e74c3c;
+    border-radius: 50%;
+    background-color: white;
+    color: #e74c3c;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+.retry-icon-btn:hover {
+    background-color: #fdecea;
 }
 .input-container {
     display: flex;
@@ -486,12 +491,29 @@ h1 {
     border-radius: 4px;
     background-color: white;
     font-size: 13px;
-    max-width: 220px;
+    max-width: 360px;
 }
 .model-select:focus {
     outline: none;
     border-color: #80bdff;
     box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+.model-refresh-btn {
+    padding: 3px 7px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: white;
+    color: #495057;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+.model-refresh-btn:hover:not(:disabled) {
+    background-color: #f1f3f5;
+}
+.model-refresh-btn:disabled {
+    color: #adb5bd;
+    cursor: default;
 }
 .model-status {
     font-size: 12px;
