@@ -1,14 +1,13 @@
 package com.example.chat.controller;
 
+import com.example.chat.service.ChatModelGateway;
 import com.example.chat.util.PromptEngineeringUtil;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,24 +23,10 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestController
 @RequestMapping("/ai/prompt")
+@RequiredArgsConstructor
 public class EgovPromptTestController {
 
-    @Value("${langchain4j.ollama.chat-model.base-url}")
-    private String chatModelBaseUrl;
-
-    /** 인증이 필요할 때만 설정. api-type과는 별개 값 (있다고 무조건 openai는 아님) */
-    @Value("${langchain4j.ollama.chat-model.api-key:}")
-    private String chatModelApiKey;
-
-    /** ollama(네이티브, 기본값) | openai(OpenAI 호환) */
-    @Value("${langchain4j.ollama.chat-model.api-type:ollama}")
-    private String chatModelApiType;
-
-    @Value("${langchain4j.ollama.chat-model.model-name}")
-    private String defaultModelName;
-
-    @Value("${langchain4j.ollama.chat-model.temperature}")
-    private Double defaultTemperature;
+    private final ChatModelGateway chatModelGateway;
 
     /**
      * Zero-shot 패턴 테스트
@@ -316,24 +301,11 @@ public class EgovPromptTestController {
     }
 
     /**
-     * 채팅 모델 생성 헬퍼 메서드.
-     * api-type이 openai면 OpenAI 호환 서버, 아니면(기본값 ollama) Ollama 네이티브를 사용한다.
+     * 채팅 모델 생성 헬퍼 메서드. 연결 설정/생성은 {@link ChatModelGateway}에 위임하고,
+     * 이 컨트롤러는 항상 기본 모델(modelName=null)을 사용한다.
      */
     private ChatModel createChatModel() {
-        if ("openai".equalsIgnoreCase(chatModelApiType)) {
-            String apiKey = (chatModelApiKey == null || chatModelApiKey.isBlank()) ? "not-needed" : chatModelApiKey;
-            return OpenAiChatModel.builder()
-                    .baseUrl(chatModelBaseUrl)
-                    .apiKey(apiKey)
-                    .modelName(defaultModelName)
-                    .temperature(defaultTemperature)
-                    .build();
-        }
-        return OllamaChatModel.builder()
-                .baseUrl(chatModelBaseUrl)
-                .modelName(defaultModelName)
-                .temperature(defaultTemperature)
-                .build();
+        return chatModelGateway.getChatModel(null);
     }
 
     /**
