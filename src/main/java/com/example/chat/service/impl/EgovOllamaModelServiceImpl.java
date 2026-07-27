@@ -114,24 +114,39 @@ public class EgovOllamaModelServiceImpl extends EgovAbstractServiceImpl implemen
         }
     }
 
-    /** ollama list 등이 데몬 응답 지연 등으로 빈 목록을 반환했을 때 재시도 전 대기 시간 */
-    private static final long EMPTY_RESULT_RETRY_DELAY_MS = 300;
+    /** ollama list 등이 데몬 응답 지연 등으로 빈 목록을 반환했을 때 재시도 전 대기 시간(1차) */
+    private static final long EMPTY_RESULT_RETRY_DELAY_MS = 500;
+
+    /**
+     * 빈 목록일 때 재시도할 최대 횟수. 원격(openai 호환) 모드는 공인 IP가 아닌 가정용
+     * 회선/동적 DNS(iptime 등) 뒤에 있는 서버로 나가는 경우가 있어, 로컬 ollama 데몬보다
+     * 응답이 느리거나 일시적으로 끊기는 일이 더 잦다 - 재시도를 1번에서 3번으로 늘리고
+     * 매 시도마다 대기 시간도 늘려서(500ms, 1000ms, 1500ms) 그 유예 시간을 벌어준다.
+     */
+    private static final int MAX_EMPTY_RESULT_RETRIES = 3;
 
     /**
      * 설치된 Ollama 모델 목록 조회 (임베딩 전용 모델 제외)
      *
      * <p>{@code ollama --version}(가용성 체크)은 데몬 없이도 성공하지만 {@code ollama list}는
      * 백그라운드 데몬이 응답해야 하므로, 데몬이 막 기동된 직후처럼 데몬 응답이 늦는 시점에는
-     * 가용은 true이면서 목록만 비어 오는 경우가 있다. 빈 목록이면 한 번만 짧게 재시도한다.</p>
+     * 가용은 true이면서 목록만 비어 오는 경우가 있다. 원격(openai 호환) 모드의 HTTP 호출도
+     * 마찬가지로 타임아웃/일시적 오류가 나면 빈 목록으로 수렴하므로 같은 재시도로 흡수된다
+     * (참고: {@link #getRemoteModels()}는 예외를 내부에서 잡아 빈 목록을 반환함).
+     * 빈 목록이면 점점 늘어나는 대기 시간을 두고 최대 {@value #MAX_EMPTY_RESULT_RETRIES}번
+     * 재시도한다.</p>
      *
      * @return 모델명 리스트
      */
     @Override
     public List<String> getInstalledModels() {
         List<String> models = fetchInstalledModels();
-        if (models.isEmpty()) {
-            log.warn("모델 목록이 비어있어 {}ms 후 재시도합니다.", EMPTY_RESULT_RETRY_DELAY_MS);
-            sleepQuietly(EMPTY_RESULT_RETRY_DELAY_MS);
+        int attempt = 0;
+        while (models.isEmpty() && attempt < MAX_EMPTY_RESULT_RETRIES) {
+            attempt++;
+            long delay = EMPTY_RESULT_RETRY_DELAY_MS * attempt;
+            log.warn("모델 목록이 비어있어 {}ms 후 재시도합니다 ({}/{}).", delay, attempt, MAX_EMPTY_RESULT_RETRIES);
+            sleepQuietly(delay);
             models = fetchInstalledModels();
         }
         return models;
