@@ -49,13 +49,13 @@ public class SqlGenController {
     }
 
     @DeleteMapping("/connections/{connectionId}")
-    public ResponseEntity<Void> deleteConnection(@PathVariable Long connectionId) {
+    public ResponseEntity<Void> deleteConnection(@PathVariable("connectionId") Long connectionId) {
         sqlGenService.deleteConnection(connectionId);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/connections/{connectionId}/tables")
-    public ResponseEntity<?> listTables(@PathVariable Long connectionId) {
+    public ResponseEntity<?> listTables(@PathVariable("connectionId") Long connectionId) {
         try {
             return ResponseEntity.ok(sqlGenService.listTables(connectionId));
         } catch (RuntimeException e) {
@@ -64,7 +64,7 @@ public class SqlGenController {
     }
 
     @GetMapping("/connections/{connectionId}/tables/{tableName}/schema")
-    public ResponseEntity<?> getTableSchema(@PathVariable Long connectionId, @PathVariable String tableName) {
+    public ResponseEntity<?> getTableSchema(@PathVariable("connectionId") Long connectionId, @PathVariable("tableName") String tableName) {
         try {
             TableSchemaDto schema = sqlGenService.getTableSchema(connectionId, tableName);
             return ResponseEntity.ok(schema);

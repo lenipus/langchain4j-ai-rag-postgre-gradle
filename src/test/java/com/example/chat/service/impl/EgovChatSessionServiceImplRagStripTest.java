@@ -41,7 +41,7 @@ class EgovChatSessionServiceImplRagStripTest {
         List<ChatMessageDto> result = service.getSessionMessages("session-1");
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).getContent()).isEqualTo("본부장 연봉 상한액이 얼마야??");
+        assertThat(result.get(0).getContent()).isEqualTo("연봉 상한액이 얼마야??");
     }
 
     @Test

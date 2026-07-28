@@ -1054,14 +1054,21 @@
         }
 
         function showImageAttachmentPreview(dataUrl) {
-            document.getElementById('image-attachment-thumbnail').src = dataUrl;
-            document.getElementById('image-attachment-preview').style.display = 'flex';
+            // chat.image-attachment.enabled=false인 프로파일(예: remote)에서는 th:if로 인해
+            // 이 엘리먼트 자체가 렌더링되지 않는다.
+            const preview = document.getElementById('image-attachment-preview');
+            const thumbnail = document.getElementById('image-attachment-thumbnail');
+            if (!preview || !thumbnail) return;
+            thumbnail.src = dataUrl;
+            preview.style.display = 'flex';
         }
 
         function clearImageAttachment() {
             pendingImage = null;
-            document.getElementById('image-attachment-preview').style.display = 'none';
-            document.getElementById('image-attachment-thumbnail').src = '';
+            const preview = document.getElementById('image-attachment-preview');
+            const thumbnail = document.getElementById('image-attachment-thumbnail');
+            if (preview) preview.style.display = 'none';
+            if (thumbnail) thumbnail.src = '';
         }
 
         function sendMessage() {

@@ -53,7 +53,7 @@ public class EgovChatSessionController {
      * 특정 세션의 메시지 목록 조회
      */
     @GetMapping("/{sessionId}/messages")
-    public ResponseEntity<List<ChatMessageDto>> getSessionMessages(@PathVariable String sessionId) {
+    public ResponseEntity<List<ChatMessageDto>> getSessionMessages(@PathVariable("sessionId") String sessionId) {
         try {
             if (!egovChatSessionService.sessionExists(sessionId)) {
                 log.warn("존재하지 않는 세션 ID: {}", sessionId);
@@ -75,7 +75,7 @@ public class EgovChatSessionController {
      */
     @PutMapping("/{sessionId}/title")
     public ResponseEntity<Void> updateSessionTitle(
-            @PathVariable String sessionId,
+            @PathVariable("sessionId") String sessionId,
             @RequestBody UpdateTitleRequest request) {
         try {
             if (!egovChatSessionService.sessionExists(sessionId)) {
@@ -96,7 +96,7 @@ public class EgovChatSessionController {
      * 세션 삭제
      */
     @DeleteMapping("/{sessionId}")
-    public ResponseEntity<Void> deleteSession(@PathVariable String sessionId) {
+    public ResponseEntity<Void> deleteSession(@PathVariable("sessionId") String sessionId) {
         try {
             if (!egovChatSessionService.sessionExists(sessionId)) {
                 log.warn("존재하지 않는 세션 ID: {}", sessionId);
