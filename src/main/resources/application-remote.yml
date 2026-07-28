@@ -63,3 +63,7 @@ rag:
 
   retrieval-log:
     delete-with-session: true
+
+chat:
+  image-attachment:
+    enabled: false
