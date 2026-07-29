@@ -3,6 +3,7 @@ package com.example.chat.config;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.rag.content.Content;
+import dev.langchain4j.rag.content.ContentMetadata;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.query.Query;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -147,6 +149,30 @@ class EgovNeighborChunkExpanderTest {
         // index=0이 잘린 것으로 보여 "다음(1)"을 붙이려 하지만, 1은 이미 결과에 있으므로 조회를 건너뛴다.
         verify(jdbcTemplate, never()).query(anyString(), any(RowMapper.class), eq("doc-1"), eq("1"));
         assertThat(result.get(0).textSegment().text()).isEqualTo(truncated0);
+    }
+
+    @Test
+    @DisplayName("이웃 청크를 붙여 확장해도 원래 청크의 score(Content 레벨 메타데이터)는 유지된다")
+    void preservesScoreMetadataWhenExpanded() {
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        String nextFull = repeat("다음청크내용", 200);
+        stubChunk(jdbcTemplate, "doc-1", 1, nextFull);
+
+        String truncatedCurrent = repeat("현재청크", CHUNK_SIZE);
+        Metadata metadata = new Metadata();
+        metadata.put("id", "doc-1");
+        metadata.put("index", "0");
+        Content scoredContent = Content.from(
+                TextSegment.from(truncatedCurrent, metadata),
+                Map.of(ContentMetadata.SCORE, 0.87));
+        ContentRetriever delegate = q -> List.of(scoredContent);
+        ContentRetriever expander = expanderOf(jdbcTemplate, delegate);
+
+        List<Content> result = expander.retrieve(Query.from("아무 질의"));
+
+        // 텍스트는 이웃 청크가 붙어 원본과 달라졌어야(확장이 실제로 일어났어야) 이 테스트가 유효하다.
+        assertThat(result.get(0).textSegment().text()).isNotEqualTo(truncatedCurrent);
+        assertThat(result.get(0).metadata().get(ContentMetadata.SCORE)).isEqualTo(0.87);
     }
 
     @Test

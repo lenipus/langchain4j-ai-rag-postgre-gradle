@@ -143,7 +143,10 @@ public class EgovNeighborChunkExpander implements ContentRetriever {
             sb.append("\n").append(after);
         }
 
-        return Content.from(TextSegment.from(sb.toString(), metadata));
+        // content.metadata()(SCORE 등 Content 레벨 메타데이터, TextSegment.metadata()와는 별개)를
+        // 그대로 넘겨야 한다 - 안 넘기면 확장된 청크는 rag_retrieval_logs에 score가 항상 null로
+        // 찍힌다(원래 유사도 점수가 있었어도 새 Content로 갈아끼우면서 유실됨).
+        return Content.from(TextSegment.from(sb.toString(), metadata), content.metadata());
     }
 
     private String lastChars(String text, int n) {

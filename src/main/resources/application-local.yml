@@ -39,8 +39,8 @@ langchain4j:
       timeout: 300s
 
 document:
-  chunk-size: 1200
-  chunk-overlap: 120
+  chunk-size: 2000
+  chunk-overlap: 200
 
 rag:
   similarity:
