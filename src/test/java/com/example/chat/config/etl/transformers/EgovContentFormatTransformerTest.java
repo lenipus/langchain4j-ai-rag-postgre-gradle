@@ -63,4 +63,26 @@ class EgovContentFormatTransformerTest {
 
         assertThat(result.text()).isEqualTo("첫 문단\n둘째 문단");
     }
+
+    @Test
+    @DisplayName("특수문자 정리를 켜도 화살표는 지워지지 않는다 (결재라인 문서의 방향 표기 보존)")
+    void keepsArrowsWhenSpecialCharsCleaned() {
+        ReflectionTestUtils.setField(transformer, "cleanSpecialChars", true);
+        String content = "팀원 → 소속 팀장 → 소속 부서(실/센터)장\n실원/팀장 → 소속 부서(실/센터)장";
+
+        Document result = transformer.transform(doc(content));
+
+        assertThat(result.text()).isEqualTo(content);
+    }
+
+    @Test
+    @DisplayName("원문자는 특수문자 정리 설정과 무관하게 항상 흔한 \"N)\" 표기로 치환된다")
+    void replacesCircledNumbersWithPlainNotation() {
+        String content = "① 팀원 → 소속 팀장\n② 실원/팀장 → 소속 부서(실/센터)장\n⑩ 열 번째\n⓪ 영번째";
+
+        Document result = transformer.transform(doc(content));
+
+        assertThat(result.text()).isEqualTo(
+                "1) 팀원 → 소속 팀장\n2) 실원/팀장 → 소속 부서(실/센터)장\n10) 열 번째\n0) 영번째");
+    }
 }

@@ -44,8 +44,19 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
     // 정규식 패턴들
     private static final Pattern CODE_BLOCK_PATTERN = Pattern.compile("```[\\s\\S]*?```");
     private static final Pattern SPECIAL_CHARS_PATTERN = Pattern.compile(
-            "[^\\uAC00-\\uD7AF\\u1100-\\u11FF\\u3130-\\u318F\\uA960-\\uA97F\\uD7B0-\\uD7FF" +
-                    "a-zA-Z0-9\\s\\n\\t\\-_.,()\\[\\]{}\"':;!?@#$%&*+=|\\\\/<>]");
+            "[^\\uAC00-\\uD7AF\\u1100-\\u11FF\\u3130-\\u318F\\uA960-\\uA97F\\uD7B0-\\uD7FF\\u2190-\\u2195" +
+                "a-zA-Z0-9\\s\\n\\t\\-_.,()\\[\\]{}\"':;!?@#$%&*+=|\\\\/<>]");
+
+    // 원문자 ⓪(U+24EA), ①~⑳(U+2460~U+2473)를 "0)", "1)" ... "20)"로 치환한다.
+    private static final Pattern CIRCLED_NUMBER_PATTERN = Pattern.compile("[\\u24EA\\u2460-\\u2473]");
+
+    private static String replaceCircledNumbers(String text) {
+        return CIRCLED_NUMBER_PATTERN.matcher(text).replaceAll(match -> {
+            int codePoint = match.group().codePointAt(0);
+            int number = (codePoint == 0x24EA) ? 0 : (codePoint - 0x2460 + 1);
+            return number + ")";
+        });
+    }
 
     @Override
     public Document transform(Document document) {
@@ -61,17 +72,12 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
             normalizedContent = normalizedContent.replaceAll("<[^>]*>", "");
         }
 
-        // 공백 정규화. \s는 줄바꿈(\n)도 포함하므로 \s+ 를 그대로 쓰면 문서의 줄바꿈 구조가
-        // 전부 스페이스로 뭉개진다(항목별로 줄바꿈된 목록형 문서가 한 줄로 이어붙는 문제의
-        // 원인이었다). 줄바꿈은 아래 줄바꿈 정규화 단계가 따로 처리하므로, 여기서는 가로
-        // 공백(스페이스·탭)만 정리한다.
+        normalizedContent = replaceCircledNumbers(normalizedContent);
+
         if (normalizeWhitespace) {
             normalizedContent = normalizedContent.replaceAll("[ \\t]+", " ");
         }
 
-        // 줄바꿈 정규화. 치환 문자열에 "\\n"(백슬래시+n 두 글자)을 쓰면 정규식 치환 문자열
-        // 이스케이프 규칙상 실제 개행이 아니라 리터럴 문자 "n"이 들어간다 - 지금까지는 위
-        // 공백 정규화가 줄바꿈을 먼저 다 없애버려서 이 버그가 드러나지 않았을 뿐이다.
         if (normalizeNewlines) {
             normalizedContent = normalizedContent.replaceAll("\\n{2,}", "\n");
         }
