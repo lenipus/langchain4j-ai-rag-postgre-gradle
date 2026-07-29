@@ -664,7 +664,9 @@
                         availableModels.forEach(model => {
                             const option = document.createElement('option');
                             option.value = model;
-                            option.textContent = model;
+                            option.textContent = model.startsWith('chatgpt:')
+                                ? `ChatGPT (${model.slice('chatgpt:'.length)})`
+                                : model;
                             modelSelect.appendChild(option);
                         });
 
@@ -748,7 +750,6 @@
         function switchTab(mode) {
             currentMode = mode;
             document.getElementById('rag-tab').classList.remove('active');
-            document.getElementById('simple-tab').classList.remove('active');
             // sqlgen.enabled=false면 th:if로 이 탭 자체가 DOM에 없다.
             const sqlgenTab = document.getElementById('sqlgen-tab');
             if (sqlgenTab) {

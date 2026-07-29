@@ -1,6 +1,7 @@
 package com.example.chat.service;
 
 import com.example.chat.config.EgovLoggingContentRetriever;
+import com.example.chat.config.SynonymQueryNormalizer;
 import com.example.chat.repository.PersistentChatMemoryStore;
 import com.example.chat.repository.RagRetrievalLogRepository;
 import dev.langchain4j.data.message.ChatMessage;
@@ -22,8 +23,11 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -42,6 +46,7 @@ public class ChatbotFactory {
     private final RagRetrievalLogRepository ragRetrievalLogRepository;
     private final PersistentChatMemoryStore chatMemoryStore;
     private final ChatModelGateway chatModelGateway;
+    private final SynonymQueryNormalizer synonymQueryNormalizer;
 
     @Value("${rag.query-compression.enabled:true}")
     private boolean queryCompressionEnabled;
@@ -59,7 +64,8 @@ public class ChatbotFactory {
             @Qualifier("contentRetriever") ContentRetriever denseContentRetriever,
             PersistentChatMemoryStore chatMemoryStore,
             ChatModelGateway chatModelGateway,
-            RagRetrievalLogRepository ragRetrievalLogRepository) {
+            RagRetrievalLogRepository ragRetrievalLogRepository,
+            SynonymQueryNormalizer synonymQueryNormalizer) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
         // 실제 EgovLoggingContentRetriever는 질의(턴)마다 turnId를 새로 발급해 createRagChatbot()에서
         // 매번 새로 감싸 만든다 (아래 selectedRetriever는 그 delegate로만 쓰인다).
@@ -67,6 +73,7 @@ public class ChatbotFactory {
         this.ragRetrievalLogRepository = ragRetrievalLogRepository;
         this.chatMemoryStore = chatMemoryStore;
         this.chatModelGateway = chatModelGateway;
+        this.synonymQueryNormalizer = synonymQueryNormalizer;
 
         if (hybridContentRetriever != null) {
             log.info("ChatbotFactory - 하이브리드 ContentRetriever 사용");
@@ -102,37 +109,47 @@ public class ChatbotFactory {
 
         AiServices<RagChatbot> builder = AiServices.builder(RagChatbot.class)
                 .streamingChatModel(streamingModel)
+                .systemMessageProvider(memoryId -> RagChatbot.RAG_SYSTEM_PROMPT + "\n\n" + currentDateContext())
                 .chatMemory(createChatMemory(sessionId, turnId));
 
-        if (queryCompressionEnabled) {
-            // 후속 질문(대명사·생략형)이 이전 대화를 반영 못 한 채 그대로 검색되는 문제를
-            // 완화하기 위해, 검색 전에 (이전 대화 + 현재 질문)을 독립형 질문으로 압축한다.
-            ChatModel compressionModel = chatModelGateway.getChatModel(modelName);
-            RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
-                    .queryTransformer(loggingQueryTransformer(
-                            new CompressingQueryTransformer(compressionModel), originalQueryTextHolder))
-                    .contentRetriever(loggingRetriever)
-                    .build();
-            builder.retrievalAugmentor(retrievalAugmentor);
-        } else {
-            builder.contentRetriever(loggingRetriever);
-        }
+        // 동의어 정규화(SynonymQueryNormalizer)는 질의 압축 여부와 무관하게 항상 거쳐야
+        // 검색 텍스트에 반영되므로, 압축이 꺼져있어도 QueryTransformer를 그대로 둔다
+        // (이전엔 이 분기에서 contentRetriever만 넘겨 QueryTransformer 자체가 없었음).
+        QueryTransformer baseTransformer = queryCompressionEnabled
+                // 후속 질문(대명사·생략형)이 이전 대화를 반영 못 한 채 그대로 검색되는 문제를
+                // 완화하기 위해, 검색 전에 (이전 대화 + 현재 질문)을 독립형 질문으로 압축한다.
+                ? new CompressingQueryTransformer(chatModelGateway.getChatModel(modelName))
+                : query -> List.of(query);
+        RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
+                .queryTransformer(loggingQueryTransformer(baseTransformer, originalQueryTextHolder))
+                .contentRetriever(loggingRetriever)
+                .build();
+        builder.retrievalAugmentor(retrievalAugmentor);
 
         return builder.build();
     }
 
     /**
-     * {@link QueryTransformer} 데코레이터. 압축 전/후 질의를 로그로 남기고, 원본 질의는
-     * {@code originalQueryTextHolder}에 채워 넣어 {@link EgovLoggingContentRetriever}가
-     * {@code rag_retrieval_logs.original_query_text}에 같이 저장할 수 있게 한다.
+     * {@link QueryTransformer} 데코레이터. 동의어 정규화(SynonymQueryNormalizer) 후 delegate에
+     * 넘기고, 압축 전/후 질의를 로그로 남긴다. 원본 질의(정규화 전, 사용자가 실제로 입력한
+     * 그대로)는 {@code originalQueryTextHolder}에 채워 넣어 {@link EgovLoggingContentRetriever}가
+     * {@code rag_retrieval_logs.original_query_text}에 같이 저장할 수 있게 한다 - 화면 표시나
+     * chat_memory 저장에는 영향 없고, 검색에 쓰이는 텍스트에만 정규화가 적용된다.
      */
     private QueryTransformer loggingQueryTransformer(QueryTransformer delegate,
                                                       AtomicReference<String> originalQueryTextHolder) {
         return query -> {
             originalQueryTextHolder.set(query.text());
-            Collection<Query> transformed = delegate.transform(query);
+
+            String normalizedText = synonymQueryNormalizer.normalize(query.text());
+            Query normalizedQuery = query.metadata() == null
+                    ? Query.from(normalizedText)
+                    : Query.from(normalizedText, query.metadata());
+
+            Collection<Query> transformed = delegate.transform(normalizedQuery);
             for (Query t : transformed) {
-                log.info("질의 압축 - 원본: [{}] -> 압축: [{}]", query.text(), t.text());
+                log.info("질의 압축 - 원본: [{}] -> 정규화: [{}] -> 압축: [{}]",
+                        query.text(), normalizedQuery.text(), t.text());
             }
             return transformed;
         };
@@ -152,8 +169,35 @@ public class ChatbotFactory {
 
         return AiServices.builder(SimpleChatbot.class)
                 .streamingChatModel(streamingModel)
+                .systemMessageProvider(memoryId -> SimpleChatbot.SIMPLE_SYSTEM_PROMPT + "\n\n" + currentDateContext())
                 .chatMemory(createChatMemory(sessionId))
                 .build();
+    }
+
+    private static final DateTimeFormatter CURRENT_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy년 MM월 dd일 EEEE", Locale.KOREAN);
+
+    /**
+     * LLM은 실행 시점의 실제 날짜를 모르므로("올해"가 몇 년인지, "다음 주"가 언제인지 등을
+     * 스스로 계산 못 함), 시스템 메시지에 매 요청마다 오늘 날짜/요일을 넣어준다.
+     * {@code @SystemMessage} 정적 어노테이션 대신 systemMessageProvider를 쓰는 이유도
+     * 이 값을 요청 시점마다 새로 계산해서 넣기 위해서다(정적 어노테이션은 컴파일 타임
+     * 상수만 허용해 매번 다른 날짜를 넣을 수 없음).
+     *
+     * <p>뒤에 붙는 계산 절차 안내는 모델이 날짜 차이/요일을 암산으로 대충 틀리는 경우가
+     * 있어(예: 오늘 기준 8일 후 요일을 틀림) 추가했다. 매 요청 고정 비용이 거의 없는
+     * 한 줄이라 항상 넣지만, 모델 자체의 계산 능력을 보장해주진 않는다 - "그나마 나아지는"
+     * 수준의 완화책이다.</p>
+     */
+    // 테스트에서 날짜를 고정해 검증할 수 있도록 package-private로 연다.
+    static String currentDateContext(LocalDate date) {
+        return "오늘은 " + date.format(CURRENT_DATE_FORMATTER) + "입니다. "
+                + "요일이나 기간을 계산할 때는 이 날짜를 기준으로 날짜 차이를 정확히 센 다음 "
+                + "그 계산 과정을 거쳐서 결론을 답하세요.";
+    }
+
+    private static String currentDateContext() {
+        return currentDateContext(LocalDate.now());
     }
 
     /**

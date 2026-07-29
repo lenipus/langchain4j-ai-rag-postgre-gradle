@@ -35,6 +35,14 @@ langchain4j:
       api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
       model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
 
+  openai:
+    chat-model:
+      enabled: ${OPENAI_CHAT_ENABLED:false}
+      api-key: ${OPENAI_CHAT_API_KEY:}
+      model-name: ${OPENAI_CHAT_MODEL_NAME:gpt-4o}
+      temperature: 0.2
+      timeout: 300s
+
 document:
   chunk-size: 2000
   chunk-overlap: 200

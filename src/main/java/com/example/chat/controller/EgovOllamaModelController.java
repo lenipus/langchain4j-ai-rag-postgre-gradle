@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,26 +40,28 @@ public class EgovOllamaModelController {
         Map<String, Object> response = new HashMap<>();
 
         try {
-            // Ollama 사용 가능 여부 확인
-            boolean isAvailable = chatModelGateway.isAvailable();
-            response.put("available", isAvailable);
+            // remote LLM 서버 가용 여부. ChatGPT는 이 서버와 별개 backend라 무관하게 항상 확인한다.
+            boolean isRemoteAvailable = chatModelGateway.isAvailable();
 
-            if (isAvailable) {
-                // 설치된 모델 목록 조회
-                List<String> models = chatModelGateway.getInstalledModels();
-                response.put("models", models);
-                response.put("count", models.size());
-                response.put("defaultModel", defaultModel);
+            List<String> models = new ArrayList<>();
+            if (isRemoteAvailable) {
+                models.addAll(chatModelGateway.getInstalledModels());
+            }
+            chatModelGateway.getOpenAiModelOption().ifPresent(models::add);
+
+            boolean anyAvailable = isRemoteAvailable || !models.isEmpty();
+            response.put("available", anyAvailable);
+            response.put("models", models);
+            response.put("count", models.size());
+            response.put("defaultModel", defaultModel);
+
+            if (anyAvailable) {
                 response.put("success", true);
-
-                log.info("Ollama 모델 목록 조회 성공: {}개 모델", models.size());
+                log.info("모델 목록 조회 성공: {}개 모델", models.size());
             } else {
-                response.put("models", List.of());
-                response.put("count", 0);
                 response.put("success", false);
                 response.put("message", "Ollama가 설치되지 않았거나 사용할 수 없습니다.");
-
-                log.warn("Ollama를 사용할 수 없습니다");
+                log.warn("사용 가능한 모델이 없습니다");
             }
 
         } catch (Exception e) {

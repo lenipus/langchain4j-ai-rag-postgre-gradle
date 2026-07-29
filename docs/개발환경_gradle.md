@@ -293,23 +293,17 @@ VSCode의 `vscjava.vscode-java-pack`(Extension Pack for Java)에는 **"Gradle fo
 
 3. **필요한 환경변수 (Run Configuration에 설정)**
 
+   개별 LLM/DB 연결값을 하나하나 넣던 방식에서, **`SPRING_PROFILES_ACTIVE`로 `local`(로컬 PC의 Ollama) / `remote`(원격 GPU 서버) 두 프로파일만 전환**하는 방식으로 바뀌었다. 각 프로파일의 세부 값(`base-url`, `api-type`, `top-k`, `chunk-size` 등)은 `application-local.yml`/`application-remote.yml`에 이미 정리되어 있고, 그중 비밀값(API 키, 실제 서버 주소 등)은 프로젝트 루트의 `.env.local`/`.env.remote`(git 미포함, 해당 프로파일 활성화 시에만 자동 로드)에 둔다.
+
    `Run` → `Edit Configurations...` → 해당 실행 설정의 `Environment variables`에 추가.
 
-   | 변수 | 기본값(yml) | 언제 오버라이드해야 하나 |
+   | 변수 | 값 | 설명 |
    |---|---|---|
-   | `SERVER_PORT` | `8081` | 포트 충돌 시 |
-   | `POSTGRES_HOST` / `POSTGRES_PORT` | `127.0.0.1` / `35432` | 프로젝트 `docker-compose.yml` 기본값(35432) 그대로 쓰면 불필요 |
-   | `POSTGRES_USER` / `POSTGRES_PASSWORD` | `tester` / `test123#` | DB 계정을 기본값과 다르게 쓸 때 |
-   | `OLLAMA_CHAT_BASE_URL` | `http://localhost:31434` | 네이티브 Ollama(포트 11434) 사용 시 필수 |
-   | `OLLAMA_CHAT_MODEL_NAME` | (없음) | **항상 지정 필요** — 미지정 시 채팅 모델을 찾지 못함 |
-   | `OLLAMA_CHAT_API_KEY` | (없음) | OpenAI 호환 엔드포인트 등 인증이 필요한 서버 사용 시 |
-   | `OLLAMA_CHAT_API_TYPE` | `ollama` | 값은 `ollama`(네이티브 API) \| `openai`(OpenAI 호환 API, `base-url`에 `/v1` 포함 필요) 두 가지. 네이티브 Ollama면 기본값 유지 |
-   | `OLLAMA_CHAT_NUM_CTX` | `0`(Ollama 기본값 사용) | 컨텍스트 윈도우(`num_ctx`) 크기를 조정할 때 (`api-type=ollama`일 때만 적용) |
-   | `OLLAMA_EMBEDDING_BASE_URL` | `http://localhost:31434` | 임베딩 서버를 채팅과 다르게 분리할 때 |
-   | `EMBEDDING_PROFILE` | `bgem3` | 임베딩 모델 프로필 전환(`gemma` \| `bgem3`). `model-name`과 PGVector `table-name`/`dimension`/`hash-table-name`이 이 값 하나로 한꺼번에 같이 바뀐다 (수동으로 따로 안 맞춰도 됨) |
-   | `OLLAMA_EMBEDDING_API_KEY` | (없음) | OpenAI 호환 엔드포인트 등 인증이 필요한 서버 사용 시 |
-   | `OLLAMA_EMBEDDING_API_TYPE` | `ollama` | 값은 `ollama` \| `openai` 두 가지 (의미는 `OLLAMA_CHAT_API_TYPE`과 동일) |
-   | `DOCUMENT_UPLOAD_PATH` | `/app/rag/upload` | **항상 자신의 로컬 경로로 재설정 필요** |
+   | `SPRING_PROFILES_ACTIVE` | `local` 또는 `remote` | 미지정 시 `application.yml` 기본값(`local`)이 적용됨 |
+   | `DOCUMENT_UPLOAD_PATH` | 자신의 로컬 경로 | 프로파일과 무관하게 **항상 재설정 필요** |
+   | `OLLAMA_CHAT_MODEL_NAME` | 사용할 채팅 모델명 | 프로파일과 무관하게 **항상 지정 필요** — 미지정 시 채팅 모델을 찾지 못함 |
+
+   > 위 세 가지 외에 프로파일별 기본값(Ollama base-url, api-type, `EMBEDDING_PROFILE` 등)을 다르게 오버라이드하고 싶다면 `application-local.yml`/`application-remote.yml`에서 쓰는 환경변수 이름을 그대로 추가하면 되지만, 보통은 Run Configuration보다 `.env.local`/`.env.remote` 파일에 넣는 쪽을 권장한다 (개인/비밀 값이 실행 설정에 남지 않으므로).
 
 4. **콘솔 한글 인코딩(UTF-8)**
 
@@ -318,6 +312,55 @@ VSCode의 `vscjava.vscode-java-pack`(Extension Pack for Java)에는 **"Gradle fo
    -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8
    ```
    (Windows 시스템 로캘 자체를 UTF-8로 바꾸면 이 옵션 없이도 되지만, 팀원 전체가 그 설정을 켰다는 보장이 없으므로 VM 옵션은 유지 권장)
+
+## 6-6. VSCode에서 열기 및 실행
+
+이 저장소는 IntelliJ뿐 아니라 VSCode로도 실행 가능하도록 `.vscode/launch.json`, `.vscode/settings.json`이 이미 커밋되어 있다. 아래는 그 설정을 활용해 실행하는 절차다.
+
+### 필요 확장
+
+| 확장 | 역할 |
+|---|---|
+| `vscjava.vscode-java-pack` (Extension Pack for Java) | Java 언어 지원 + `vscjava.vscode-gradle`(Gradle for Java) 번들 포함 — Gradle 프로젝트 자동 인식/의존성 다운로드 |
+| `vmware.vscode-boot-dev-pack` (또는 `vmware.vscode-spring-boot` 단독) | Spring Boot 관련 지원(`@RequestMapping` URL 심볼 검색 등, 부록 4 참고) |
+
+### 프로젝트 열기
+
+`build.gradle`이 있는 폴더를 `File` → `Open Folder...`로 열면, Gradle for Java 확장이 자동으로 Gradle 프로젝트로 인식하고 의존성을 내려받는다 (하단 상태바 또는 `Java Projects`/`Gradle Projects` 패널에서 진행 상황 확인 가능). 이때 생기는 컴파일 출력은 Gradle의 `build/`가 아니라 언어서버(JDT) 자체 폴더인 `bin/`이다 — Run 실행도 이 `bin/`을 사용한다 (부록 2 참고).
+
+JDK 경로 등은 이미 `.vscode/settings.json`에 커밋되어 있어(`java.jdt.ls.java.home`, `java.configuration.runtimes` 등) 별도 설정 없이 그대로 동작한다. 자신의 JDK 21 설치 경로가 다르면 이 파일의 경로만 맞게 수정한다.
+
+### 실행
+
+`.vscode/launch.json`에 `Langchain4jRagApplication` 실행 설정이 이미 등록되어 있다. 방법은 편한 걸로 골라 쓴다.
+
+1. `Langchain4jRagApplication.java` 파일을 열고, `main` 메서드 위에 뜨는 `Run` / `Debug` 코드 렌즈 클릭
+2. `Run and Debug` 패널(`Ctrl+Shift+D`)에서 상단 드롭다운에 `Langchain4jRagApplication` 선택 후 `F5`
+3. Spring Boot Dashboard 확장(`vscjava.vscode-spring-boot-dashboard`)의 사이드바 목록에서 앱 우클릭 → `Start`/`Debug`
+
+### 환경변수 설정
+
+IntelliJ Run Configuration의 `Environment variables`에 해당하는 부분이 VSCode에서는 `launch.json`의 `env` 블록이다. 6-5-3절과 동일한 값을 아래처럼 채운다:
+
+```jsonc
+{
+  "type": "java",
+  "name": "Langchain4jRagApplication",
+  "request": "launch",
+  "mainClass": "com.example.chat.Langchain4jRagApplication",
+  "projectName": "langchain4j-ai-rag-postgre",
+  "vmArgs": "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8",
+  "env": {
+    "SPRING_PROFILES_ACTIVE": "local",
+    "DOCUMENT_UPLOAD_PATH": "D:/본인경로/upload",
+    "OLLAMA_CHAT_MODEL_NAME": "qwen3:4b-q4_K_M"
+  }
+}
+```
+
+`vmArgs`의 UTF-8 옵션은 이미 파일에 들어있어 콘솔 한글 깨짐 걱정 없이 그대로 쓰면 된다.
+
+> `launch.json`은 저장소에 커밋되는 공용 파일이라, `env` 블록에 개인 경로(`DOCUMENT_UPLOAD_PATH` 등)를 직접 채워 넣으면 다른 사람 환경과 충돌할 수 있다. 개인/비밀 값은 `.env.local`/`.env.remote`(git 미포함)에 두고, `launch.json`에는 팀 공통으로 맞는 값(`SPRING_PROFILES_ACTIVE` 정도)만 남기는 편이 안전하다.
 
 ## 7. 공통 인프라 기동 — PostgreSQL(pgvector)
 

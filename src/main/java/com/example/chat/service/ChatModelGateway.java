@@ -72,6 +72,44 @@ public class ChatModelGateway {
     @Value("${langchain4j.ollama.chat-model.num-ctx:0}")
     private Integer chatModelNumCtx;
 
+    /**
+     * ChatGPT(OpenAI 실제 API) 연결 설정. {@code langchain4j.ollama.chat-model.*}(remote LLM
+     * 서버)와는 완전히 별개 backend라 base-url을 안 주면 langchain4j가 api.openai.com/v1로
+     * 접속한다.
+     */
+    @Value("${langchain4j.openai.chat-model.enabled:false}")
+    private boolean openAiEnabled;
+
+    @Value("${langchain4j.openai.chat-model.api-key:}")
+    private String openAiApiKey;
+
+    @Value("${langchain4j.openai.chat-model.model-name:gpt-4o}")
+    private String openAiModelName;
+
+    @Value("${langchain4j.openai.chat-model.temperature:0.3}")
+    private Double openAiTemperature;
+
+    @Value("${langchain4j.openai.chat-model.timeout:120s}")
+    private Duration openAiTimeout;
+
+    /** 모델 목록에서 ChatGPT 항목을 구분하는 접두사. 프론트는 이 값을 그대로 model 파라미터로 돌려보낸다. */
+    private static final String OPENAI_MODEL_PREFIX = "chatgpt:";
+
+    private boolean isOpenAiModel(String modelName) {
+        return modelName != null && modelName.startsWith(OPENAI_MODEL_PREFIX);
+    }
+
+    /**
+     * ChatGPT를 모델 목록에 노출할지 여부. enabled=true고 api-key가 설정돼 있어야 하며,
+     * remote LLM 서버 가용성과는 무관하다(호출부가 서버 다운 여부로 이 값을 걸러내면 안 됨).
+     */
+    public Optional<String> getOpenAiModelOption() {
+        if (!openAiEnabled || openAiApiKey == null || openAiApiKey.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(OPENAI_MODEL_PREFIX + openAiModelName);
+    }
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -107,6 +145,14 @@ public class ChatModelGateway {
      * api-type이 openai면 OpenAI 호환 서버, 아니면(기본값 ollama) Ollama 네이티브를 사용한다.
      */
     public StreamingChatModel getStreamingModel(String modelName) {
+        if (isOpenAiModel(modelName)) {
+            return OpenAiStreamingChatModel.builder()
+                    .apiKey(openAiApiKey)
+                    .modelName(modelName.substring(OPENAI_MODEL_PREFIX.length()))
+                    .temperature(openAiTemperature)
+                    .timeout(openAiTimeout)
+                    .build();
+        }
         String effectiveModelName = resolveModelName(modelName);
         if (isRemoteMode()) {
             return OpenAiStreamingChatModel.builder()
@@ -134,6 +180,14 @@ public class ChatModelGateway {
      * {@link #getStreamingModel(String)}과 동일하다.
      */
     public ChatModel getChatModel(String modelName) {
+        if (isOpenAiModel(modelName)) {
+            return OpenAiChatModel.builder()
+                    .apiKey(openAiApiKey)
+                    .modelName(modelName.substring(OPENAI_MODEL_PREFIX.length()))
+                    .temperature(openAiTemperature)
+                    .timeout(openAiTimeout)
+                    .build();
+        }
         String effectiveModelName = resolveModelName(modelName);
         if (isRemoteMode()) {
             return OpenAiChatModel.builder()

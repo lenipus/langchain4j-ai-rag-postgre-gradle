@@ -1,7 +1,6 @@
 package com.example.chat.service;
 
 import dev.langchain4j.data.message.ImageContent;
-import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import reactor.core.publisher.Flux;
 
@@ -14,6 +13,9 @@ import reactor.core.publisher.Flux;
  */
 public interface SimpleChatbot {
 
+    // 시스템 메시지는 @SystemMessage 정적 어노테이션 대신 ChatbotFactory가
+    // AiServices.systemMessageProvider(...)로 매 요청마다 동적으로 넣는다 - 오늘 날짜/요일을
+    // 붙여서 상대 날짜 질문도 계산할 수 있게 하기 위함(RagChatbot과 동일한 이유).
     String SIMPLE_SYSTEM_PROMPT = """
             당신은 도움이 되는 AI 어시스턴트입니다.
             사용자의 질문에 대해 친절하고 정확한 답변을 제공하세요.
@@ -30,7 +32,6 @@ public interface SimpleChatbot {
      * @param query 사용자 질문
      * @return Flux<String> (리액티브 스트리밍 응답)
      */
-    @SystemMessage(SIMPLE_SYSTEM_PROMPT)
     Flux<String> streamChat(@UserMessage String query);
 
     /**
@@ -40,7 +41,6 @@ public interface SimpleChatbot {
      * @param image 첨부 이미지
      * @return Flux<String> (리액티브 스트리밍 응답)
      */
-    @SystemMessage(SIMPLE_SYSTEM_PROMPT)
     Flux<String> streamChat(@UserMessage String query, @UserMessage ImageContent image);
 
     /**
@@ -49,6 +49,5 @@ public interface SimpleChatbot {
      * @param query 사용자 질문
      * @return AI 응답
      */
-    @SystemMessage(SIMPLE_SYSTEM_PROMPT)
     String chat(@UserMessage String query);
 }
