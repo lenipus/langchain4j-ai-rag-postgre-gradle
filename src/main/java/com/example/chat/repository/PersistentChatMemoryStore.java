@@ -12,6 +12,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +29,17 @@ import java.util.List;
 public class PersistentChatMemoryStore implements ChatMemoryStore {
 
     private final ChatMemoryRepository chatMemoryRepository;
+
+    /**
+     * 세션당 유지할 최대 메시지 수(대화 기록 + 시스템 메시지). {@code MessageWindowChatMemory}
+     * 자체의 창(window) 크기는 {@code ChatbotFactory}에서 사실상 무제한으로 크게 잡아두고,
+     * 실제 개수 제한은 여기서 짝(질문+답변) 단위로 직접 처리한다 - langchain4j의 기본
+     * ensureCapacity()는 인덱스 기준으로 한 개씩만 잘라내서, 잘리는 지점이 짝의 중간에
+     * 걸리면 새로고침 후 히스토리가 "답변"부터 시작하는(그 짝의 질문은 이미 삭제된) 문제가
+     * 있었다.
+     */
+    @Value("${chat.memory.max-messages:20}")
+    private int maxMessages = 20;
 
     /**
      * 특정 세션의 모든 메시지 조회
@@ -53,7 +65,36 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         }
 
         // log.debug("채팅 메모리 조회 완료 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
-        return messages;
+        return applyPairSafeWindow(messages, maxMessages);
+    }
+
+    /**
+     * 최대 개수를 넘으면 오래된 쪽부터 잘라내되, 잘리는 시작점이 ASSISTANT(답변) 메시지면
+     * 그 앞의 USER(질문)까지 한 개 더 포함해서 질문부터 시작하게 한다 - 그래서 실제로는
+     * maxMessages보다 하나 더(질문+답변 쌍이 안 깨지도록) 남을 수 있다. 맨 앞 SYSTEM
+     * 메시지(있다면)는 이 창 계산과 무관하게 항상 유지한다.
+     */
+    private List<ChatMessage> applyPairSafeWindow(List<ChatMessage> messages, int maxMessages) {
+        if (messages.size() <= maxMessages) {
+            return messages;
+        }
+
+        int systemOffset = (!messages.isEmpty() && messages.get(0) instanceof SystemMessage) ? 1 : 0;
+        List<ChatMessage> conversation = messages.subList(systemOffset, messages.size());
+
+        int conversationLimit = maxMessages - systemOffset;
+        if (conversation.size() <= conversationLimit) {
+            return messages;
+        }
+
+        int cutFrom = conversation.size() - conversationLimit;
+        if (cutFrom > 0 && conversation.get(cutFrom) instanceof AiMessage) {
+            cutFrom--;
+        }
+
+        List<ChatMessage> result = new ArrayList<>(messages.subList(0, systemOffset));
+        result.addAll(conversation.subList(cutFrom, conversation.size()));
+        return result;
     }
 
     /**

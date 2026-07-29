@@ -51,9 +51,6 @@ public class ChatbotFactory {
     @Value("${rag.query-compression.enabled:true}")
     private boolean queryCompressionEnabled;
 
-    @Value("${chat.memory.max-messages:20}")
-    private int maxMessages;
-
     /**
      * @param hybridContentRetriever 하이브리드 검색 빈. {@code rag.retrieval.hybrid.enabled=true}
      *                               일 때만 등록되며 off(기본) 상태에서는 null 이다.
@@ -219,14 +216,22 @@ public class ChatbotFactory {
     }
 
     /**
+     * MessageWindowChatMemory 자체의 창 크기는 사실상 무제한으로 크게 잡아둔다. 실제
+     * chat.memory.max-messages 제한은 PersistentChatMemoryStore.getMessages()가 질문+답변
+     * 짝이 안 깨지도록 직접 처리한다 - langchain4j 기본 ensureCapacity()는 인덱스 기준으로
+     * 하나씩만 잘라내서, 짝의 중간이 잘리면 새로고침 시 히스토리가 "답변"부터 시작하는
+     * 문제가 있었다.
+     */
+    private static final int CHAT_MEMORY_WINDOW_UNLIMITED = 100_000;
+
+    /**
      * MessageWindowChatMemory 생성 (턴 키 없이 - 단순 채팅용)
-     * - 최근 N개 메시지만 유지
      * - PersistentChatMemoryStore를 통해 PostgreSQL에 자동 저장
      */
     private MessageWindowChatMemory createChatMemory(String sessionId) {
         return MessageWindowChatMemory.builder()
                 .id(sessionId)
-                .maxMessages(maxMessages)
+                .maxMessages(CHAT_MEMORY_WINDOW_UNLIMITED)
                 .chatMemoryStore(chatMemoryStore)
                 .build();
     }
@@ -238,7 +243,7 @@ public class ChatbotFactory {
     private MessageWindowChatMemory createChatMemory(String sessionId, String turnId) {
         return MessageWindowChatMemory.builder()
                 .id(sessionId)
-                .maxMessages(maxMessages)
+                .maxMessages(CHAT_MEMORY_WINDOW_UNLIMITED)
                 .chatMemoryStore(new TurnTaggingChatMemoryStore(chatMemoryStore, turnId))
                 .build();
     }

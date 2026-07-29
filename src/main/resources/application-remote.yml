@@ -25,7 +25,7 @@ langchain4j:
       api-type: ${OLLAMA_CHAT_API_TYPE:openai}
       model-name: ${OLLAMA_CHAT_MODEL_NAME:}
       temperature: 0.1
-      timeout: 600s
+      timeout: 200s
       # 원격 GPU 서버는 로컬 CPU보다 훨씬 빠르게 큰 컨텍스트를 처리할 수 있어 더 크게 잡아도 된다.
       # 실제 값은 GPU VRAM과 선택할 모델의 최대 컨텍스트에 맞춰 조정하세요.
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:32768}
@@ -40,8 +40,8 @@ langchain4j:
       enabled: ${OPENAI_CHAT_ENABLED:false}
       api-key: ${OPENAI_CHAT_API_KEY:}
       model-name: ${OPENAI_CHAT_MODEL_NAME:gpt-4o}
-      temperature: 0.2
-      timeout: 300s
+      temperature: 0.1
+      timeout: 200s
 
 document:
   chunk-size: 2000
@@ -51,7 +51,7 @@ document:
 rag:
   similarity:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
-  top-k: 6
+  top-k: 4
 
   query-compression:
     enabled: true
@@ -65,7 +65,7 @@ rag:
       weight:
         dense: 1.0
         lexical: 0.2
-      top-k: 6
+      top-k: 4
       lexical:
         word-similarity-threshold: 0.10
 

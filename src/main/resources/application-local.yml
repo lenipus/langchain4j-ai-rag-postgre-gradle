@@ -45,7 +45,7 @@ document:
 rag:
   similarity:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
-  top-k: 5
+  top-k: 4
 
   query-compression:
     enabled: true
@@ -59,7 +59,7 @@ rag:
       weight:
         dense: 1.0
         lexical: 0.2
-      top-k: 3
+      top-k: 4
       lexical:
         word-similarity-threshold: 0.10
 
