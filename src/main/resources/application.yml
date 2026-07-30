@@ -9,11 +9,6 @@ spring:
   config:
     import: optional:file:.env[.properties]
 
-  # 채팅 서버(langchain4j.ollama.*)/RAG 튜닝처럼 환경마다 값이 다른 설정은 application-{profile}.yml로 분리했다.
-  # SPRING_PROFILES_ACTIVE 환경변수로 전환
-  profiles:
-    active: ${SPRING_PROFILES_ACTIVE:local}
-
   servlet:
     multipart:
       max-file-size: 100MB
@@ -21,9 +16,9 @@ spring:
 
   # PostgreSQL 데이터베이스 설정
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:35432}/ragdb
-    username: ${POSTGRES_USER:tester}
-    password: ${POSTGRES_PASSWORD:test123#}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/ragdb
+    username: ${POSTGRES_USER:}
+    password: ${POSTGRES_PASSWORD:}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 10
@@ -48,26 +43,29 @@ spring:
 langchain4j:
   chat:
     ollama:
-      base-url: ${OLLAMA_CHAT_BASE_URL:http://localhost:31434}
+      base-url: ${OLLAMA_CHAT_BASE_URL:}
       api-key: ${OLLAMA_CHAT_API_KEY:}
-      api-type: ${OLLAMA_CHAT_API_TYPE:ollama}        # API 규격: (ollama, openai)
+      api-type: ${OLLAMA_CHAT_API_TYPE:}
       model-name: ${OLLAMA_CHAT_MODEL_NAME:}
-      temperature: 0.2
-      timeout: 300s
+      temperature: 0.1
+      repeat-penalty: 1.1
+      frequency-penalty: 0.3
+      presence-penalty: 0.0
+      timeout: 200s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:8192}
     # ChatGPT 연결
     openai:
       enabled: ${OPENAI_CHAT_ENABLED:false}
       api-key: ${OPENAI_CHAT_API_KEY:}
-      model-name: ${OPENAI_CHAT_MODEL_NAME:gpt-4o}
-      temperature: 0.2
-      timeout: 300s
+      model-name: ${OPENAI_CHAT_MODEL_NAME:}
+      temperature: 0
+      timeout: 200s
 
   embedding:
     ollama:
-      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
+      base-url: ${OLLAMA_EMBEDDING_BASE_URL:}
       api-key: ${OLLAMA_EMBEDDING_API_KEY:}
-      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
+      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}
       model-name: qllama/bge-m3:q8_0
 
 # PGVector 설정
@@ -132,7 +130,7 @@ rag:
 # 채팅 메모리 설정
 chat:
   memory:
-    max-messages: 20
+    max-messages: 30
     table-name: chat_memory
   image-attachment:
     enabled: false

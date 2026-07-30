@@ -6,7 +6,6 @@ import com.example.chatbot.chat.repository.PersistentChatMemoryStore;
 import com.example.chatbot.chat.repository.RagRetrievalLogRepository;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
