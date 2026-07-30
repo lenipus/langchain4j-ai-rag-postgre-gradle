@@ -30,11 +30,6 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
-# 애플리케이션 설정
-app:
-  # ONNX 임베딩 모델 설정 파일 경로 (테스트 시 dummy)
-  embedding-config-path: src/test/resources/dummy-embedding-config.json
-
 # LangChain4j Ollama 설정 (테스트 시 dummy)
 langchain4j:
   chat:

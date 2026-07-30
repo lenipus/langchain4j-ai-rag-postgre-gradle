@@ -14,7 +14,6 @@
 | 컨테이너 레지스트리 | 이미지 push 가능한 레지스트리 |
 | PostgreSQL + PGVector | `postgres-pgvector` 서비스로 접근 가능해야 함 |
 | Ollama | 클러스터 내 `ollama` 서비스(11434 포트) 또는 외부 주소 |
-| ONNX 임베딩 모델 | 사용자가 직접 준비 후 PVC에 적재 (이미지에 포함되지 않음) |
 
 ---
 
@@ -40,41 +39,12 @@ docker push <레지스트리>/langchain4j-ai-rag-postgre:1.0.0
 
 ---
 
-## 2. 임베딩 모델 PVC 준비
+## 2. 임베딩 모델 PVC (더 이상 필요 없음)
 
-ONNX 임베딩 모델과 `embeddingConfig.json`은 이미지에 포함되지 않는다.
-배포 전 아래 순서로 PVC를 생성하고 모델 파일을 적재한다.
-
-```bash
-# PVC 생성
-kubectl apply -f k8s/models-pvc.yaml
-
-# 임시 파드로 파일 복사 (minikube 예시)
-kubectl run model-loader --image=busybox --restart=Never \
-  --overrides='{"spec":{"volumes":[{"name":"m","persistentVolumeClaim":{"claimName":"langchain4j-ai-rag-postgre-models"}}],"containers":[{"name":"c","image":"busybox","command":["sleep","3600"],"volumeMounts":[{"name":"m","mountPath":"/models"}]}]}}'
-
-kubectl cp <로컬-모델-디렉토리>/. model-loader:/models/
-kubectl delete pod model-loader
-```
-
-PVC는 사용자 홈 디렉터리 내용을 `/models`에 마운트한다. 따라서 `application.yml` 기본값
-(`${user.home}/langchain4j-Config/Config/embeddingConfig.json`)과 동일한 하위 경로를 유지해야 한다.
-
-PVC 내 디렉토리 구조 예시:
-
-```
-/models/
-└── langchain4j-Config/
-    ├── Config/
-    │   └── embeddingConfig.json   ← APP_EMBEDDING_CONFIG_PATH 참조 경로
-    └── model/
-        ├── model.onnx             ← embeddingConfig.json의 modelPath
-        └── tokenizer.json         ← embeddingConfig.json의 tokenizerPath
-```
-
-> `embeddingConfig.json`의 `modelPath`/`tokenizerPath`는 `${HOME}/langchain4j-Config/model/...` 형태이며,
-> `ConfigUtils.resolvePath`가 `${HOME}`을 HOME 환경변수로 치환한다. ConfigMap에 `HOME: /models`를 두어
-> 모델 파일이 PVC 마운트 경로 기준으로 해석되도록 한다.
+임베딩을 ONNX 로컬 모델 대신 Ollama(`langchain4j.ollama.*`) 원격 호출로 전환하면서,
+`embeddingConfig.json`/`model.onnx` 등을 PVC에 적재하던 절차는 더 이상 필요 없다.
+`k8s/models-pvc.yaml`과 `deployment.yaml`의 `models` 볼륨 마운트 자체를 배포에서
+제거할지는 별도로 검토가 필요하다(아직 정리 안 됨).
 
 ---
 
@@ -102,8 +72,6 @@ image: <레지스트리>/langchain4j-ai-rag-postgre:1.0.0
 | `PGVECTOR_DATABASE` | `ragdb` | `pgvector.database` |
 | `PGVECTOR_USERNAME` | `postgres` | `pgvector.username` |
 | `LANGCHAIN4J_OLLAMA_BASE_URL` | `http://ollama:11434` | `langchain4j.ollama.base-url` |
-| `APP_EMBEDDING_CONFIG_PATH` | `/models/langchain4j-Config/Config/embeddingConfig.json` | `app.embedding-config-path` |
-| `HOME` | `/models` | `embeddingConfig.json`의 `${HOME}` 치환 기준 경로 |
 | `MANAGEMENT_HEALTH_PROBES_ENABLED` | `true` | `management.health.probes.enabled` |
 
 > `SPRING_DATASOURCE_*`와 `PGVECTOR_*`는 각각 독립적인 연결 설정이며 둘 다 `postgres-pgvector`를 가리킨다.
@@ -164,7 +132,7 @@ kubectl rollout status deployment/langchain4j-ai-rag-postgre
 kubectl exec -it <pod-name> -- wget -qO- http://127.0.0.1:8080/actuator/health
 ```
 
-> **참고** — ONNX 모델 로딩에 시간이 걸리므로 `readinessProbe.initialDelaySeconds`는 60초로 설정되어 있다.
+> **참고** — 초기 구동 시간을 고려해 `readinessProbe.initialDelaySeconds`는 60초로 설정되어 있다.
 
 ---
 
@@ -231,13 +199,12 @@ spec:
 | Readiness probe | `GET /actuator/health/readiness` | 트래픽 수신 준비 여부 (initialDelay: 60s) |
 | Liveness probe | `GET /actuator/health/liveness` | 재시작 필요 여부 (initialDelay: 60s) |
 | CPU requests/limits | `500m` / `2000m` | |
-| Memory requests/limits | `2Gi` / `8Gi` | ONNX 모델 로딩 고려 |
+| Memory requests/limits | `2Gi` / `8Gi` | |
 | PostgreSQL 서비스명 | `postgres-pgvector` | 클러스터 내 DNS |
 | PostgreSQL 포트 | `5432` | |
 | DB 이름 | `ragdb` | |
 | Ollama 서비스 | `http://ollama:11434` | 클러스터 내 DNS 기본값 |
-| 임베딩 설정 파일 경로 | `/models/langchain4j-Config/Config/embeddingConfig.json` | PVC 마운트 경로 |
-| 모델 PVC | `langchain4j-ai-rag-postgre-models` (5Gi) | 사전 적재 필요 |
+| 모델 PVC | `langchain4j-ai-rag-postgre-models` (5Gi) | 더 이상 안 씀 - 제거 검토 필요(2번 참고) |
 
 ---
 
