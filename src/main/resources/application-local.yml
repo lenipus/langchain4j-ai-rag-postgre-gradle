@@ -11,12 +11,9 @@ spring:
   config:
     import: optional:file:.env.local[.properties]
 
-embedding:
-  active-profile: ${EMBEDDING_PROFILE:bgem3}
-
 langchain4j:
-  ollama:
-    chat-model:
+  chat:
+    ollama:
       base-url: ${OLLAMA_CHAT_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_CHAT_API_KEY:}
       api-type: ${OLLAMA_CHAT_API_TYPE:ollama}        # API 규격: (ollama, openai)
@@ -24,47 +21,19 @@ langchain4j:
       temperature: 0.4
       timeout: 300s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:8192}
-    embedding-model:
-      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
-      api-key: ${OLLAMA_EMBEDDING_API_KEY:}
-      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
-      model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
-
-  openai:
-    chat-model:
+    openai:
       enabled: ${OPENAI_CHAT_ENABLED:false}
       api-key: ${OPENAI_CHAT_API_KEY:}
       model-name: ${OPENAI_CHAT_MODEL_NAME:gpt-4o}
       temperature: 0.2
       timeout: 300s
 
-document:
-  chunk-size: 2000
-  chunk-overlap: 200
-
-rag:
-  similarity:
-    threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
-  top-k: 4
-
-  query-compression:
-    enabled: true
-
-  retrieval:
-    overfetch-multiplier: 3
-    min-chunk-length: 250
-
-    hybrid:
-      enabled: false
-      weight:
-        dense: 1.0
-        lexical: 0.2
-      top-k: 4
-      lexical:
-        word-similarity-threshold: 0.10
-
-  retrieval-log:
-    delete-with-session: true
+  embedding:
+    ollama:
+      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
+      api-key: ${OLLAMA_EMBEDDING_API_KEY:}
+      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
+      model-name: qllama/bge-m3:q8_0
 
 chat:
   image-attachment:

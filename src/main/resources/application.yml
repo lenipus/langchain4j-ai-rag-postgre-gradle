@@ -39,7 +39,7 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
         # session_factory:
-        #  statement_inspector: com.example.chat.config.DynamicTableInspector
+        #  statement_inspector: com.example.chatbot.chat.config.DynamicTableInspector
     show-sql: false
 
   # 빈 오버라이딩 허용
@@ -57,25 +57,10 @@ spring:
 #   - src/main/java/com/example/chat/config/EgovEmbeddingConfig.java : 위 JSON 파일(embeddingConfig.json)을 역직렬화하는 DTO (modelPath, tokenizerPath 등).
 #   - k8s/configmap.yaml, k8s/README.md : APP_EMBEDDING_CONFIG_PATH 환경 변수로 이 값을 주입하던 k8s 설정/문서.
 
-# 임베딩 모델 프로필: model-name과 PGVector 설정(table-name, dimension, hash-table-name)을 하나로 묶는다.
-embedding:
-  active-profile: ${EMBEDDING_PROFILE:gemma}  # gemma | bgem3
-  profiles:
-    gemma:
-      model-name: embeddinggemma:300m
-      dimension: 768
-      table-name: document_embeddings
-      hash-table-name: document_hashes
-    bgem3:
-      model-name: qllama/bge-m3:q8_0
-      dimension: 1024
-      table-name: document_embeddings_bgem3
-      hash-table-name: document_hashes_bgem3
-
-# LangChain4j Ollama 설정
+# LangChain4j 설정 - "무슨 용도(chat/embedding)"가 최상위, 그 안에서 "어느 백엔드(ollama/openai)"를 고른다.
 langchain4j:
-  ollama:
-    chat-model:
+  chat:
+    ollama:
       base-url: ${OLLAMA_CHAT_BASE_URL:http://localhost:31434}
       api-key: ${OLLAMA_CHAT_API_KEY:}
       api-type: ${OLLAMA_CHAT_API_TYPE:ollama}        # API 규격: (ollama, openai)
@@ -83,34 +68,34 @@ langchain4j:
       temperature: 0.2
       timeout: 300s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:8192}
-    embedding-model:
-      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
-      api-key: ${OLLAMA_EMBEDDING_API_KEY:}
-      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
-      model-name: ${embedding.profiles.${embedding.active-profile}.model-name}
-
-  # ChatGPT 연결
-  openai:
-    chat-model:
+    # ChatGPT 연결
+    openai:
       enabled: ${OPENAI_CHAT_ENABLED:false}
       api-key: ${OPENAI_CHAT_API_KEY:}
       model-name: ${OPENAI_CHAT_MODEL_NAME:gpt-4o}
       temperature: 0.2
       timeout: 300s
 
-# PGVector 설정 - embedding.active-profile에 따라 자동으로 결정됨
+  embedding:
+    ollama:
+      base-url: ${OLLAMA_EMBEDDING_BASE_URL:http://localhost:31434}
+      api-key: ${OLLAMA_EMBEDDING_API_KEY:}
+      api-type: ${OLLAMA_EMBEDDING_API_TYPE:ollama}   # API 규격: (ollama, openai)
+      model-name: qllama/bge-m3:q8_0
+
+# PGVector 설정
 pgvector:
-  table-name: ${embedding.profiles.${embedding.active-profile}.table-name}
-  dimension: ${embedding.profiles.${embedding.active-profile}.dimension}
+  table-name: document_embeddings
+  dimension: 1024
   create-table: true
   distance-type: cosine   # 거리 측정 방식: (cosine, euclidean, inner_product)
-  hash-table-name: ${embedding.profiles.${embedding.active-profile}.hash-table-name}
+  hash-table-name: document_hashes
 
 document:
   allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
   upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
-  chunk-size: 1200
-  chunk-overlap: 120
+  chunk-size: 2000
+  chunk-overlap: 200
 
   # 재인덱싱 시 파일 단위 동시 처리 개수 (1 ~ 4)
   processing:
@@ -128,23 +113,17 @@ document:
 rag:
   similarity:
     threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
-  top-k: 3
+  top-k: 5
 
   query-compression:
     enabled: true
 
-  # 검색 전에 사내 은어/축약어(SynonymQueryNormalizer)를 문서 원문 용어로 치환할지 여부.
-  # 대화 기록/화면 표시 텍스트는 안 건드리고 검색용 질의 텍스트에만 적용된다.
   query-normalization:
     enabled: true
 
   retrieval:
     overfetch-multiplier: 3
     min-chunk-length: 250
-
-    # 검색된 청크가 잘린 것으로 보일 때(EgovNeighborChunkExpander), 이웃 청크에서 실제로
-    # 덧붙일 최대 길이. 인덱싱 시 chunk-overlap과는 별개 값 - chunk-overlap은 그대로 두고
-    # 싶어서 분리했다.
     neighbor-expansion-chars: 400
 
     # 하이브리드 검색(dense 벡터 + lexical pg_trgm, RRF 융합) 설정
@@ -175,7 +154,7 @@ chat:
 session:
   table-name: chat_sessions
 
-# SQL 생성 도구(com.example.sqlgen) 설정
+# SQL 생성 도구(com.example.chatbot.sqlgen) 설정
 sqlgen:
   enabled: ${SQLGEN_FEATURE_ENABLED:false}
   encryption:
@@ -184,7 +163,7 @@ sqlgen:
 # 로깅 설정
 logging:
   level:
-    com.example.chat: DEBUG
+    com.example.chatbot.chat: DEBUG
     dev.langchain4j: INFO
     ai.djl: WARN
     org.hibernate.SQL: OFF

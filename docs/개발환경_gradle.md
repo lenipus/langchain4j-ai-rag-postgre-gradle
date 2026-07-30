@@ -347,7 +347,7 @@ IntelliJ Run Configuration의 `Environment variables`에 해당하는 부분이 
   "type": "java",
   "name": "Langchain4jRagApplication",
   "request": "launch",
-  "mainClass": "com.example.chat.Langchain4jRagApplication",
+  "mainClass": "com.example.chatbot.Langchain4jRagApplication",
   "projectName": "langchain4j-ai-rag-postgre",
   "vmArgs": "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8",
   "env": {

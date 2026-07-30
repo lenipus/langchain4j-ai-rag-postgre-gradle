@@ -37,8 +37,8 @@ app:
 
 # LangChain4j Ollama 설정 (테스트 시 dummy)
 langchain4j:
-  ollama:
-    chat-model:
+  chat:
+    ollama:
       base-url: http://localhost:11434
       model-name: HyperCLOVA-3b:Q4_K_MM
       temperature: 0.4
@@ -99,7 +99,7 @@ session:
 # 로깅 설정
 logging:
   level:
-    com.example.chat: DEBUG
+    com.example.chatbot.chat: DEBUG
     dev.langchain4j: INFO
     ai.djl: WARN
     org.hibernate.SQL: DEBUG
