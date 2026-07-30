@@ -46,17 +46,6 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
-# # 애플리케이션 설정
-# app:
-#   # ONNX 임베딩 모델 설정 파일 경로
-#   embedding-config-path: ${EMBEDDING_MODEL_PATH:D:/VSCODE/rag/onnx-uv/model}/embeddingConfig.json
-#
-#   관련 파일 (임베딩 Ollama 전환으로 전부 주석 처리됨):
-#   - src/main/java/com/example/chat/util/ConfigUtils.java : 이 프로퍼티(app.embedding-config-path)를 @Value로 주입받아 JSON 설정 파일을 읽던 유틸리티. 현재 전체 주석 처리됨.
-#   - src/main/java/com/example/chat/config/EgovLangChain4jConfig.java : ConfigUtils.loadConfig()를 호출해 modelPath/tokenizerPath를 읽고 OnnxEmbeddingModel을 생성하던 로직. 현재 전체 주석 처리됨.
-#   - src/main/java/com/example/chat/config/EgovEmbeddingConfig.java : 위 JSON 파일(embeddingConfig.json)을 역직렬화하는 DTO (modelPath, tokenizerPath 등).
-#   - k8s/configmap.yaml, k8s/README.md : APP_EMBEDDING_CONFIG_PATH 환경 변수로 이 값을 주입하던 k8s 설정/문서.
-
 # LangChain4j 설정 - "무슨 용도(chat/embedding)"가 최상위, 그 안에서 "어느 백엔드(ollama/openai)"를 고른다.
 langchain4j:
   chat:
