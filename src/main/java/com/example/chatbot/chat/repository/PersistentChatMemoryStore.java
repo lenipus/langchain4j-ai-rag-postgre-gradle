@@ -1,7 +1,7 @@
 package com.example.chatbot.chat.repository;
 
 import com.example.chatbot.chat.entity.ChatMemoryEntity;
-import com.example.chatbot.chat.service.SqlGenChatbot;
+import com.example.chatbot.sqlgen.service.SqlGenChatbot;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;

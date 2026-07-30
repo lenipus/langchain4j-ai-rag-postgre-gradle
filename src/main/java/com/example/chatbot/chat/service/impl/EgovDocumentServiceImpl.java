@@ -52,11 +52,11 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     @Value("${document.allowed-upload-extensions:.md,.pdf,.docx}")
     private String[] allowedUploadExtensions;
 
-    // 재인덱싱 시 파일 단위 동시 처리 개수. 1~MAX_CONCURRENCY 범위를 벗어나면 clamp한다
-    private static final int MAX_CONCURRENCY = 4;
-
     @Value("${document.processing.concurrency:1}")
     private int configuredConcurrency;
+
+    // 재인덱싱 시 파일 단위 동시 처리 개수. 1~MAX_CONCURRENCY 범위를 벗어나면 clamp한다
+    private static final int MAX_CONCURRENCY = 4;
 
     // ETL 파이프라인 컴포넌트들
     private final EgovDocumentScanner egovDocumentScanner;

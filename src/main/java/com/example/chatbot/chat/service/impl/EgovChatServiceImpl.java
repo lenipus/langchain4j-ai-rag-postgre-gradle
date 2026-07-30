@@ -6,7 +6,7 @@ import com.example.chatbot.chat.service.ChatbotFactory;
 import com.example.chatbot.chat.service.PendingImageStore;
 import com.example.chatbot.chat.service.RagChatbot;
 import com.example.chatbot.chat.service.SimpleChatbot;
-import com.example.chatbot.chat.service.SqlGenChatbot;
+import com.example.chatbot.sqlgen.service.SqlGenChatbot;
 import com.example.chatbot.sqlgen.service.SqlGenService;
 import dev.langchain4j.data.message.ImageContent;
 import lombok.RequiredArgsConstructor;
@@ -38,15 +38,16 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
 
     private final ChatbotFactory chatbotFactory;
     private final PendingImageStore pendingImageStore;
-
-    // sqlgen.enabled=false면 SqlGenServiceImpl 빈 자체가 안 만들어지므로(SqlGenPasswordEncryptor의
-    // 암호화 키 미설정 때문에 앱 구동이 실패하지 않도록), Optional로 받아 없으면 SQL 생성
-    // 요청 시 안내 메시지로 처리한다 (streamSqlGenResponse 참고).
     private final Optional<SqlGenService> sqlGenService;
 
     // false면 프런트가 imageToken을 보내도 무시한다(프런트 UI를 우회해 직접 호출해도 안전).
     @Value("${chat.image-attachment.enabled:true}")
     private boolean imageAttachmentEnabled;
+
+    private static final int MEMORY_CONFLICT_MAX_RETRIES = 2;
+    private static final long MEMORY_CONFLICT_RETRY_DELAY_MS = 300;
+    private static final Pattern PROMPT_TOKENS_PATTERN = Pattern.compile("n_prompt_tokens\\\\*\"?\\s*:\\s*(\\d+)");
+    private static final Pattern CTX_TOKENS_PATTERN = Pattern.compile("n_ctx\\\\*\"?\\s*:\\s*(\\d+)");
 
     /**
      * 세션별 RAG 기반 스트리밍 응답 생성
@@ -190,43 +191,9 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         }
     }
 
-    /**
-     * RAG 응답 생성 (비스트리밍)
-     */
-    public String generateRagResponse(String query) {
-        String sessionId = SessionContext.getCurrentSessionId();
-        log.info("RAG 응답 생성 (비스트리밍) - 세션: {}, 쿼리: {}", sessionId, query);
-
-        try {
-            RagChatbot ragChatbot = chatbotFactory.createRagChatbot(null, sessionId);
-            return ragChatbot.chat(query);
-
-        } catch (Exception e) {
-            log.error("RAG 응답 생성 중 오류", e);
-            return handleException(e);
-        }
-    }
-
-    /**
-     * 일반 응답 생성 (비스트리밍)
-     */
-    public String generateSimpleResponse(String query) {
-        String sessionId = SessionContext.getCurrentSessionId();
-        log.info("Simple 응답 생성 (비스트리밍) - 세션: {}, 쿼리: {}", sessionId, query);
-
-        try {
-            SimpleChatbot simpleChatbot = chatbotFactory.createSimpleChatbot(null, sessionId);
-            return simpleChatbot.chat(query);
-
-        } catch (Exception e) {
-            log.error("Simple 응답 생성 중 오류", e);
-            return handleException(e);
-        }
-    }
-
     /** imageToken을 1회성으로 소비해 ImageContent로 변환한다. 없거나 만료됐으면 null. */
     // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
-    ImageContent resolveImageContent(String imageToken) {
+    private ImageContent resolveImageContent(String imageToken) {
         if (!imageAttachmentEnabled || imageToken == null || imageToken.isBlank()) {
             return null;
         }
@@ -245,17 +212,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
     }
 
     /**
-     * 예외 처리
-     */
-    private String handleException(Exception e) {
-        return friendlyErrorMessage(e);
-    }
-
-    /** "중지" 직후 곧바로 재질문했을 때의 채팅 메모리 저장 충돌 재시도 최대 횟수. */
-    private static final int MEMORY_CONFLICT_MAX_RETRIES = 2;
-    private static final long MEMORY_CONFLICT_RETRY_DELAY_MS = 300;
-
-    /**
      * 응답을 "중지"한 직후 바로 새 질문을 보내면, 방금 중단된 스트림이 서버 쪽에서 아직
      * 마무리 중이던 채팅 메모리 저장(PersistentChatMemoryStore.updateMessages - 세션 전체
      * 메시지를 delete 후 재삽입)과 새 질문의 메모리 저장이 같은 세션 행을 동시에 건드려
@@ -263,12 +219,8 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      * EventSource.close()로 연결만 끊었을 뿐, 서버의 LLM 호출/메모리 저장 자체는 별도
      * 스레드에서 계속 진행 중이었기 때문). 대부분 수백ms 안에 끝나는 일시적 경합이므로,
      * 채팅 자체를 실패로 보여주는 대신 짧게 재시도한다.
-     *
-     * <p>이 충돌은 매 요청 시작 시 동기적으로(스트림을 만들기도 전에) 발생하므로, 스트림에
-     * 이미 흘려보낸 토큰을 되돌릴 필요 없이 챗봇 생성 + streamChat() 호출 자체를 다시
-     * 시도하면 된다.</p>
      */
-    Flux<String> withMemoryConflictRetry(Supplier<Flux<String>> streamSupplier, String sessionId) {
+    private Flux<String> withMemoryConflictRetry(Supplier<Flux<String>> streamSupplier, String sessionId) {
         int attempt = 0;
         while (true) {
             try {
@@ -289,26 +241,14 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         }
     }
 
-    // Ollama 원본 오류 본문이 langchain4j 예외 메시지 안에 JSON-in-JSON으로 한 번 더 감싸여
-    // 오므로, 실제 메시지에는 큰따옴표 앞에 이스케이프 백슬래시(\")가 그대로 문자로 남아있다
-    // (예: ...\"n_prompt_tokens\":13018...). 그래서 따옴표 앞의 백슬래시는 있어도 없어도
-    // 매칭되게 \\* 로 느슨하게 잡는다.
-    private static final Pattern PROMPT_TOKENS_PATTERN = Pattern.compile("n_prompt_tokens\\\\*\"?\\s*:\\s*(\\d+)");
-    private static final Pattern CTX_TOKENS_PATTERN = Pattern.compile("n_ctx\\\\*\"?\\s*:\\s*(\\d+)");
-
     /**
      * 예외를 사용자에게 보여줄 친화적인 한국어 메시지로 변환한다. 원인 체인을 훑어 Ollama의
      * "컨텍스트 크기 초과"(exceed_context_size_error) 오류처럼 구체적인 원인을 알 수 있는
      * 경우 실제 토큰 수까지 포함한 메시지를 만들고, 그 외에는 기존 타임아웃/연결 오류
      * 메시지로, 마지막엔 원본 메시지를 그대로 붙인 범용 메시지로 폴백한다.
-     *
-     * <p>이 메서드가 필요했던 이유: 채팅 기록이 길어져 모델의 컨텍스트 창을 넘기면 Ollama가
-     * "model is required"처럼 뭉뚱그린 게 아니라 실제 토큰 수(n_prompt_tokens/n_ctx)를
-     * 정확히 알려주는데, 그동안은 이 정보를 그냥 버리고 "네트워크 연결을 확인해 주세요"처럼
-     * 아무 단서도 없는 메시지만 보여줬었다.</p>
      */
     // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
-    String friendlyErrorMessage(Throwable e) {
+    private String friendlyErrorMessage(Throwable e) {
         if (e instanceof ObjectOptimisticLockingFailureException) {
             return "죄송합니다. 방금 응답을 중지한 직후라 이전 요청 정리와 충돌했습니다. 잠시 후 다시 시도해주세요.";
         }
@@ -359,7 +299,7 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      *
      */
     // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
-    Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
+    private Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
         return stream
                 .onErrorResume(e -> {
                     log.error("[{}] 스트리밍 실패 - 세션: {}", serviceType, sessionId, e);

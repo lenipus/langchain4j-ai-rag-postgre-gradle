@@ -12,7 +12,7 @@ import java.util.List;
  * 스키마를 조회하고, LLM에 전달할 스키마 컨텍스트 텍스트를 만든다.
  *
  * <p>실제 LLM 호출은 채팅 화면(SQL 생성 모드)의 {@code EgovChatServiceImpl}이
- * {@link com.example.chatbot.chat.service.SqlGenChatbot}을 통해 수행한다 - 이 인터페이스는 그때 쓸
+ * {@link SqlGenChatbot}을 통해 수행한다 - 이 인터페이스는 그때 쓸
  * 스키마 컨텍스트만 만들어준다. 생성된 SQL은 절대 자동 실행하지 않는다 - 텍스트로만
  * 반환해 사용자가 직접 검토 후 사용하도록 한다.</p>
  */
@@ -22,7 +22,7 @@ public interface SqlGenService {
      * SQL 생성 시 항상 적용되는 공통 지시사항(System 메시지로 전달됨).
      * DBMS 이름/테이블 스키마처럼 매 요청마다 달라지는 내용은 여기 안 들어가고
      * {@code SqlGenServiceImpl.formatSchemaBlock()}이 만드는, 사용자 메시지 뒤에 붙는
-     * 스키마 컨텍스트 쪽에 들어간다 (자세한 흐름은 {@link com.example.chatbot.chat.service.SqlGenChatbot} 참고).
+     * 스키마 컨텍스트 쪽에 들어간다 (자세한 흐름은 {@link SqlGenChatbot} 참고).
      */
     String SQL_GEN_SYSTEM_PROMPT = """
             당신은 SQL 전문가입니다. 사용자 메시지에 제공된 테이블 스키마를 참고하여 사용자의 요청에 맞는 SQL 쿼리를 작성하세요.

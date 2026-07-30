@@ -4,6 +4,7 @@ import com.example.chatbot.chat.config.EgovLoggingContentRetriever;
 import com.example.chatbot.chat.config.SynonymQueryNormalizer;
 import com.example.chatbot.chat.repository.PersistentChatMemoryStore;
 import com.example.chatbot.chat.repository.RagRetrievalLogRepository;
+import com.example.chatbot.sqlgen.service.SqlGenChatbot;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;

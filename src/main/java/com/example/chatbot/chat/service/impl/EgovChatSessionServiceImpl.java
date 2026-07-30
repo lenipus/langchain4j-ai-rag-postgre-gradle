@@ -8,7 +8,7 @@ import com.example.chatbot.chat.repository.ChatMemoryRepository;
 import com.example.chatbot.chat.repository.ChatSessionRepository;
 import com.example.chatbot.chat.repository.RagRetrievalLogRepository;
 import com.example.chatbot.chat.service.EgovChatSessionService;
-import com.example.chatbot.chat.service.SqlGenChatbot;
+import com.example.chatbot.sqlgen.service.SqlGenChatbot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.egovframe.rte.fdl.cmmn.EgovAbstractServiceImpl;
@@ -33,6 +33,9 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
     /** 세션 삭제 시 그 세션의 RAG 검색 감사 로그(rag_retrieval_logs)도 같이 지울지 여부. */
     @Value("${rag.retrieval-log.delete-with-session:true}")
     private boolean deleteRagLogWithSession;
+
+    private static final String RAG_INJECTION_MARKER = "\n\nAnswer using the following information:\n";
+    private static final String SQLGEN_CONTEXT_MARKER = SqlGenChatbot.SCHEMA_CONTEXT_MARKER;
 
     @Override
     @Transactional
@@ -65,17 +68,6 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                 .collect(Collectors.toList());
     }
 
-    /**
-     * LangChain4j DefaultContentInjector가 사용자 메시지에 덧붙이는 RAG 컨텍스트 구분자.
-     * ChatMemoryStore(PersistentChatMemoryStore)는 AiServices가 현재 턴의 프롬프트를
-     * 재구성할 때도 그대로 재사용하는 소스이므로 저장 시점에 잘라내면 안 되고,
-     * 화면 표시용으로 조회할 때만 잘라낸다.
-     */
-    private static final String RAG_INJECTION_MARKER = "\n\nAnswer using the following information:\n";
-
-    /** SQL 생성 모드가 스키마 컨텍스트를 붙일 때 쓰는 구분자. 역할은 위 RAG 마커와 동일. */
-    private static final String SQLGEN_CONTEXT_MARKER = SqlGenChatbot.SCHEMA_CONTEXT_MARKER;
-
     @Override
     @Transactional(readOnly = true)
     public List<ChatMessageDto> getSessionMessages(String sessionId) {
@@ -94,23 +86,6 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                         entity.getImageMimeType(),
                         entity.getCreatedAt()))
                 .collect(Collectors.toList());
-    }
-
-    /** RAG 삽입 마커와 SQL 생성 스키마 컨텍스트 마커 중 먼저 나오는 위치에서 잘라낸다. */
-    private String stripInjectedContext(String content) {
-        if (content == null) {
-            return null;
-        }
-        int ragIndex = content.indexOf(RAG_INJECTION_MARKER);
-        int sqlGenIndex = content.indexOf(SQLGEN_CONTEXT_MARKER);
-        int cutIndex = -1;
-        if (ragIndex >= 0) {
-            cutIndex = ragIndex;
-        }
-        if (sqlGenIndex >= 0 && (cutIndex < 0 || sqlGenIndex < cutIndex)) {
-            cutIndex = sqlGenIndex;
-        }
-        return cutIndex >= 0 ? content.substring(0, cutIndex) : content;
     }
 
     @Override
@@ -170,5 +145,22 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
         chatSessionRepository.deleteById(sessionId);
 
         log.debug("세션 삭제: {} (RAG 로그 삭제: {})", sessionId, deleteRagLogWithSession);
+    }
+
+    /** RAG 삽입 마커와 SQL 생성 스키마 컨텍스트 마커 중 먼저 나오는 위치에서 잘라낸다. */
+    private String stripInjectedContext(String content) {
+        if (content == null) {
+            return null;
+        }
+        int ragIndex = content.indexOf(RAG_INJECTION_MARKER);
+        int sqlGenIndex = content.indexOf(SQLGEN_CONTEXT_MARKER);
+        int cutIndex = -1;
+        if (ragIndex >= 0) {
+            cutIndex = ragIndex;
+        }
+        if (sqlGenIndex >= 0 && (cutIndex < 0 || sqlGenIndex < cutIndex)) {
+            cutIndex = sqlGenIndex;
+        }
+        return cutIndex >= 0 ? content.substring(0, cutIndex) : content;
     }
 }

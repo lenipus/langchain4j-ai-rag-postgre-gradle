@@ -32,9 +32,4 @@ public class SessionContext {
         log.debug("세션 컨텍스트 정리: {}", currentSession);
         CURRENT_SESSION_ID.remove();
     }
-
-    public static boolean isDefaultSession() {
-        String sessionId = getCurrentSessionId();
-        return DEFAULT_CONVERSATION_ID.equals(sessionId);
-    }
 }

@@ -1,6 +1,5 @@
-package com.example.chatbot.chat.service;
+package com.example.chatbot.sqlgen.service;
 
-import com.example.chatbot.sqlgen.service.SqlGenService;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import reactor.core.publisher.Flux;
