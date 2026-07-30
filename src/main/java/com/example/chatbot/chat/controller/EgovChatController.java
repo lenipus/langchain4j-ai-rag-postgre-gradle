@@ -39,7 +39,7 @@ public class EgovChatController {
      * 이미지 첨부 업로드 - base64 이미지는 스트리밍(EventSource, GET) 요청 URL에 실어보내기엔
      * 너무 크므로, 먼저 여기 업로드해 토큰만 받고 스트리밍 요청에는 그 토큰만 실어보낸다.
      */
-    @PostMapping("/api/chat/attach-image")
+    @PostMapping("/ai/chat/attach-image")
     public ImageAttachmentResponseDto attachImage(@RequestBody ImageAttachmentRequestDto request) {
         if (!imageAttachmentEnabled) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "이미지 첨부 기능이 비활성화되어 있습니다.");

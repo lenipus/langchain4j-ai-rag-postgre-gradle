@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 채팅에 첨부할 이미지를 짧게 보관하는 저장소.
  *
  * <p>base64 이미지는 URL 쿼리 파라미터(EventSource 스트리밍 요청)로 실어보내기엔 너무 크므로,
- * 먼저 이 저장소에 업로드해 토큰만 발급받고({@code POST /api/chat/attach-image}), 실제
+ * 먼저 이 저장소에 업로드해 토큰만 발급받고({@code POST /ai/chat/attach-image}), 실제
  * 스트리밍 요청에는 그 토큰만 실어보낸다. 토큰은 1회성이라 조회 즉시 제거되고, 끝까지
  * 안 쓰인 채 남은 것들은 {@link #store}를 호출할 때마다 함께 청소된다(별도 스케줄러 없음).
  */

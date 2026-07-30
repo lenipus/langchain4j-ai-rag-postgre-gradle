@@ -14,7 +14,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/chat/sessions")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class EgovChatSessionController {
 
     private final EgovChatSessionService egovChatSessionService;

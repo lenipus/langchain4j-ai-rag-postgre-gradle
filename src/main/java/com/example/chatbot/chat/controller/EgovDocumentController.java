@@ -15,7 +15,6 @@ import java.util.concurrent.CompletableFuture;
 @RestController
 @RequestMapping("/api/documents")
 @RequiredArgsConstructor
-@CrossOrigin
 public class EgovDocumentController {
 
     private final EgovDocumentService egovDocumentService;

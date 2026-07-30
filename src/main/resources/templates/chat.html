@@ -1158,14 +1158,14 @@
         //
         // requestParams.image(첨부 이미지)가 있으면, base64를 그대로 스트리밍 URL에 실어보낼
         // 수 없어서(EventSource는 GET만 지원, base64는 URL 길이 제한을 넘기 쉬움) 먼저
-        // /api/chat/attach-image로 업로드해 토큰만 받아온 뒤 실제 스트리밍을 시작한다. 토큰은
+        // /ai/chat/attach-image로 업로드해 토큰만 받아온 뒤 실제 스트리밍을 시작한다. 토큰은
         // 1회성이라 재시도 때도 매번 새로 업로드한다(requestParams.image에 원본을 그대로 남겨둠).
         function streamAiResponse(requestParams, aiMessageDiv, sendBtn) {
             if (!requestParams.image) {
                 startStreamingWithImageToken(requestParams, aiMessageDiv, sendBtn, null);
                 return;
             }
-            fetch('/api/chat/attach-image', {
+            fetch('/ai/chat/attach-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestParams.image)
