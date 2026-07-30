@@ -71,28 +71,6 @@ public class EgovChatSessionController {
     }
 
     /**
-     * 세션 제목 업데이트
-     */
-    @PutMapping("/{sessionId}/title")
-    public ResponseEntity<Void> updateSessionTitle(
-            @PathVariable("sessionId") String sessionId,
-            @RequestBody UpdateTitleRequest request) {
-        try {
-            if (!egovChatSessionService.sessionExists(sessionId)) {
-                log.warn("존재하지 않는 세션 ID: {}", sessionId);
-                return ResponseEntity.notFound().build();
-            }
-
-            egovChatSessionService.updateSessionTitle(sessionId, request.getTitle());
-            log.info("세션 제목 업데이트: {} -> {}", sessionId, request.getTitle());
-            return ResponseEntity.ok().build();
-        } catch (Exception e) {
-            log.error("세션 제목 업데이트 실패: {}", sessionId, e);
-            return ResponseEntity.internalServerError().build();
-        }
-    }
-
-    /**
      * 세션 삭제
      */
     @DeleteMapping("/{sessionId}")
