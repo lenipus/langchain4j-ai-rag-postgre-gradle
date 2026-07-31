@@ -291,6 +291,11 @@
             // localStorage에 저장 (새로고침 시 유지)
             localStorage.setItem('currentSessionId', sessionId);
 
+            // 전송 버튼은 activeStreamController 하나로 전역 상태를 겸하다 보니, 다른
+            // 세션이 스트리밍 중일 때 이 세션으로 넘어와도 "중지" 모양이 그대로 남아있었다.
+            // 지금 보는 세션 기준으로 버튼 모양을 다시 맞춘다.
+            syncSendButtonToSession(sessionId);
+
             // 세션 정보 가져오기
             const session = sessions.get(sessionId);
             if (session) {
@@ -993,14 +998,35 @@
                 '<span class="thinking-elapsed">(0s)</span></div>';
         }
 
-        // 전송 버튼 하나가 상태에 따라 "전송"/"중지" 두 가지 역할을 겸한다 - 스트리밍
-        // 중이면 지금 응답을 끊고, 아니면 평소처럼 새 질문을 보낸다.
+        // 전송 버튼 하나가 상태에 따라 "전송"/"중지" 두 가지 역할을 겸한다 - 지금 보는
+        // 세션이 실제로 스트리밍 중일 때만 지금 응답을 끊고, 아니면 평소처럼 새 질문을
+        // 보낸다(다른 세션이 스트리밍 중이어도 여기서는 중지 대상이 아니다).
         function handleSendButtonClick() {
-            if (activeStreamController) {
+            if (activeStreamController && activeStreamController.sessionId === currentSessionId) {
                 activeStreamController.stop();
             } else {
                 sendMessage();
             }
+        }
+
+        // 전송 버튼 모양을 지금 보는 세션 기준으로 맞춘다. activeStreamController는 세션과
+        // 무관하게 전역 하나뿐이라, 다른 세션이 스트리밍 중일 때 이 세션으로 전환해도
+        // "중지" 모양이 그대로 남아있는 문제(정작 눌러도 이 세션엔 중지할 응답이 없음)를 막는다.
+        function syncSendButtonToSession(sessionId) {
+            const sendBtn = document.getElementById('send-btn');
+            if (!sendBtn) return;
+
+            const streamingThisSession = activeStreamController && activeStreamController.sessionId === sessionId;
+            if (streamingThisSession) {
+                sendBtn.textContent = '⏹';
+                sendBtn.classList.add('stop-mode');
+                sendBtn.title = '응답 중지';
+            } else {
+                sendBtn.textContent = '전송';
+                sendBtn.classList.remove('stop-mode');
+                sendBtn.removeAttribute('title');
+            }
+            sendBtn.disabled = false;
         }
 
         // 이미지 파일 하나를 읽어 pendingImage로 등록하고 미리보기를 띄운다.

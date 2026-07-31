@@ -1,5 +1,6 @@
 package com.example.chatbot.chat.service;
 
+import com.example.chatbot.chat.config.EgovKeywordBoostContentRetriever;
 import com.example.chatbot.chat.config.EgovLoggingContentRetriever;
 import com.example.chatbot.chat.config.SynonymQueryNormalizer;
 import com.example.chatbot.chat.repository.PersistentChatMemoryStore;
@@ -21,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -64,11 +66,18 @@ public class ChatbotFactory {
             ChatModelGateway chatModelGateway,
             RagRetrievalLogRepository ragRetrievalLogRepository,
             SynonymQueryNormalizer synonymQueryNormalizer,
-            DateCalculationTool dateCalculationTool) {
+            DateCalculationTool dateCalculationTool,
+            JdbcTemplate jdbcTemplate,
+            @Value("${pgvector.table-name:document_embeddings}") String embeddingTableName) {
         // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
         // 실제 EgovLoggingContentRetriever는 질의(턴)마다 turnId를 새로 발급해 createRagChatbot()에서
         // 매번 새로 감싸 만든다 (아래 selectedRetriever는 그 delegate로만 쓰인다).
-        this.selectedRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
+        //
+        // EgovKeywordBoostContentRetriever는 이 선택 이후(하이브리드 융합/길이 필터 등 top-k
+        // 컷이 전부 끝난 뒤) 가장 바깥쪽에서 감싼다 - 그래야 강제로 끼워 넣는 문서가 fusion
+        // 단계에서 밀려날 일 없이 항상 살아남는다.
+        ContentRetriever chosenRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
+        this.selectedRetriever = new EgovKeywordBoostContentRetriever(chosenRetriever, jdbcTemplate, embeddingTableName);
         this.ragRetrievalLogRepository = ragRetrievalLogRepository;
         this.chatMemoryStore = chatMemoryStore;
         this.chatModelGateway = chatModelGateway;

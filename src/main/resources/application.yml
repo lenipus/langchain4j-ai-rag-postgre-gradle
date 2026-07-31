@@ -58,7 +58,7 @@ langchain4j:
       enabled: ${OPENAI_CHAT_ENABLED:false}
       api-key: ${OPENAI_CHAT_API_KEY:}
       model-name: ${OPENAI_CHAT_MODEL_NAME:}
-      temperature: 0
+      temperature: 1
       timeout: 200s
 
   embedding:

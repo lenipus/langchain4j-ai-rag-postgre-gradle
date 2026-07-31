@@ -218,6 +218,10 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         } else if (message instanceof AiMessage aiMessage) {
             messageType = "ASSISTANT";
             content = aiMessage.text();
+            if (content == null || content.isBlank()) {
+                log.warn("빈 AI 응답이라 저장하지 않음 - 세션: {}", sessionId);
+                return null;
+            }
         } else if (message instanceof SystemMessage systemMessage) {
             messageType = "SYSTEM";
             content = systemMessage.text();
