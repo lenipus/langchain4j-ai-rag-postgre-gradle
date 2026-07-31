@@ -47,7 +47,7 @@ langchain4j:
       api-key: ${OLLAMA_CHAT_API_KEY:}
       api-type: ${OLLAMA_CHAT_API_TYPE:}
       model-name: ${OLLAMA_CHAT_MODEL_NAME:}
-      temperature: 0.1
+      temperature: 0
       repeat-penalty: 1.1
       frequency-penalty: 0.3
       presence-penalty: 0.0

@@ -174,15 +174,24 @@ public class ChatModelGateway {
      */
     public StreamingChatModel getStreamingModel(String modelName) {
         if (isOpenAiModel(modelName)) {
+            String actualModelName = modelName.substring(OPENAI_MODEL_PREFIX.length());
+            log.info("스트리밍 모델 생성 - backend: openai(ChatGPT), model: {}, temperature: {}, timeout: {}",
+                    actualModelName, openAiTemperature, openAiTimeout);
             return OpenAiStreamingChatModel.builder()
                     .apiKey(openAiApiKey)
-                    .modelName(modelName.substring(OPENAI_MODEL_PREFIX.length()))
+                    .modelName(actualModelName)
                     .temperature(openAiTemperature)
                     .timeout(openAiTimeout)
+                    .logRequests(true)
+                    .logResponses(true)
                     .build();
         }
         String effectiveModelName = resolveModelName(modelName);
         if (isRemoteMode()) {
+            log.info("스트리밍 모델 생성 - backend: openai 호환(remote), model: {}, temperature: {}, timeout: {}, "
+                            + "frequencyPenalty: {}, presencePenalty: {}",
+                    effectiveModelName, chatModelTemperature, chatModelTimeout,
+                    chatModelFrequencyPenalty, chatModelPresencePenalty);
             return OpenAiStreamingChatModel.builder()
                     .baseUrl(chatModelBaseUrl)
                     .apiKey(resolveApiKey(chatModelApiKey))
@@ -191,15 +200,22 @@ public class ChatModelGateway {
                     .timeout(chatModelTimeout)
                     .frequencyPenalty(chatModelFrequencyPenalty)
                     .presencePenalty(chatModelPresencePenalty)
+                    .logRequests(true)
+                    .logResponses(true)
                     .build();
         }
+        int numCtx = resolveNumCtx(effectiveModelName);
+        log.info("스트리밍 모델 생성 - backend: ollama, model: {}, temperature: {}, timeout: {}, "
+                        + "repeatPenalty: {}, numCtx: {}",
+                effectiveModelName, chatModelTemperature, chatModelTimeout, chatModelRepeatPenalty, numCtx);
         var builder = OllamaStreamingChatModel.builder()
                 .baseUrl(chatModelBaseUrl)
                 .modelName(effectiveModelName)
                 .temperature(chatModelTemperature)
                 .timeout(chatModelTimeout)
-                .repeatPenalty(chatModelRepeatPenalty);
-        int numCtx = resolveNumCtx(effectiveModelName);
+                .repeatPenalty(chatModelRepeatPenalty)
+                .logRequests(true)
+                .logResponses(true);
         if (numCtx > 0) {
             builder.numCtx(numCtx);
         }
@@ -212,15 +228,24 @@ public class ChatModelGateway {
      */
     public ChatModel getChatModel(String modelName) {
         if (isOpenAiModel(modelName)) {
+            String actualModelName = modelName.substring(OPENAI_MODEL_PREFIX.length());
+            log.info("비스트리밍 모델 생성 - backend: openai(ChatGPT), model: {}, temperature: {}, timeout: {}",
+                    actualModelName, openAiTemperature, openAiTimeout);
             return OpenAiChatModel.builder()
                     .apiKey(openAiApiKey)
-                    .modelName(modelName.substring(OPENAI_MODEL_PREFIX.length()))
+                    .modelName(actualModelName)
                     .temperature(openAiTemperature)
                     .timeout(openAiTimeout)
+                    .logRequests(true)
+                    .logResponses(true)
                     .build();
         }
         String effectiveModelName = resolveModelName(modelName);
         if (isRemoteMode()) {
+            log.info("비스트리밍 모델 생성 - backend: openai 호환(remote), model: {}, temperature: {}, timeout: {}, "
+                            + "frequencyPenalty: {}, presencePenalty: {}",
+                    effectiveModelName, chatModelTemperature, chatModelTimeout,
+                    chatModelFrequencyPenalty, chatModelPresencePenalty);
             return OpenAiChatModel.builder()
                     .baseUrl(chatModelBaseUrl)
                     .apiKey(resolveApiKey(chatModelApiKey))
@@ -229,15 +254,22 @@ public class ChatModelGateway {
                     .timeout(chatModelTimeout)
                     .frequencyPenalty(chatModelFrequencyPenalty)
                     .presencePenalty(chatModelPresencePenalty)
+                    .logRequests(true)
+                    .logResponses(true)
                     .build();
         }
+        int numCtx = resolveNumCtx(effectiveModelName);
+        log.info("비스트리밍 모델 생성 - backend: ollama, model: {}, temperature: {}, timeout: {}, "
+                        + "repeatPenalty: {}, numCtx: {}",
+                effectiveModelName, chatModelTemperature, chatModelTimeout, chatModelRepeatPenalty, numCtx);
         var builder = OllamaChatModel.builder()
                 .baseUrl(chatModelBaseUrl)
                 .modelName(effectiveModelName)
                 .temperature(chatModelTemperature)
                 .timeout(chatModelTimeout)
-                .repeatPenalty(chatModelRepeatPenalty);
-        int numCtx = resolveNumCtx(effectiveModelName);
+                .repeatPenalty(chatModelRepeatPenalty)
+                .logRequests(true)
+                .logResponses(true);
         if (numCtx > 0) {
             builder.numCtx(numCtx);
         }
