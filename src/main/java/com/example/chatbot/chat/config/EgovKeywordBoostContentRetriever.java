@@ -38,6 +38,15 @@ public class EgovKeywordBoostContentRetriever implements ContentRetriever {
             )
     );
 
+    /**
+     * 키워드 매칭으로 강제 포함시키는 파일명 목록. 이 파일들은 유사도 점수와 무관하게
+     * 포함시키는 게 목적이므로, 리랭커({@code EgovResilientRerankingAggregator})가 뒤에서
+     * 다시 낮은 점수로 잘라내면 안 된다 - 그쪽에서 "항상 보존" 판단에 이 목록을 그대로 쓴다.
+     */
+    public static Set<String> protectedFileNames() {
+        return KEYWORD_BOOST_FILES.keySet();
+    }
+
     private final ContentRetriever delegate;
     private final JdbcTemplate jdbcTemplate;
     private final String tableName;

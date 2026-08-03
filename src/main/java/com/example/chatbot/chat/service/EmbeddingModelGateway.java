@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class EmbeddingModelGateway {
 
-    @Value("${langchain4j.embedding.ollama.base-url:http://localhost:31434}")
+    @Value("${langchain4j.embedding.ollama.base-url:}")
     private String embeddingModelBaseUrl;
 
     /** 인증이 필요할 때만 설정. api-type과는 별개 값 (있다고 무조건 openai는 아님) */

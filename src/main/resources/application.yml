@@ -97,7 +97,8 @@ document:
 # RAG 설정
 rag:
   similarity:
-    threshold: 0.50   # 유사도 임계값 (0.0 ~ 1.0)
+    # 유사도 임계값 (0.0 ~ 1.0).
+    threshold: 0.50
   top-k: 5
 
   query-compression:
@@ -122,6 +123,17 @@ rag:
       top-k: 3
       lexical:
         word-similarity-threshold: 0.10
+
+  # llama.cpp(--reranking) 서버로 검색 후보를 재정렬하는 리랭커 설정.
+  # 별도 docker 컨테이너(bge-reranker-v2-m3, /v1/rerank)가 떠 있어야 동작한다 - 꺼져있으면(기본)
+  # 재정렬 없이 기존처럼 검색 순서 그대로 top-k를 쓴다.
+  reranker:
+    enabled: false
+    base-url: http://localhost:31435
+    timeout: 300s
+    # CPU 전용 리랭커라 후보가 많을수록(특히 -c/-b를 키운 뒤) 30초도 넘기는 게 실측됨 -
+    # 20 -> 10으로 줄여서 채점량 자체를 낮춘다. top-k(5)보다는 여전히 넉넉한 배수(2배)다.
+    candidate-pool: 10
 
   # RAG 검색 감사 로그(rag_retrieval_logs, EgovLoggingContentRetriever가 기록) 관련 설정.
   retrieval-log:

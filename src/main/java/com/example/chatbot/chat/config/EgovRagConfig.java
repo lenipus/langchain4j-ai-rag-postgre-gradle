@@ -2,6 +2,10 @@ package com.example.chatbot.chat.config;
 
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.scoring.ScoringModel;
+import dev.langchain4j.rag.content.aggregator.ContentAggregator;
+import dev.langchain4j.rag.content.aggregator.DefaultContentAggregator;
+import dev.langchain4j.rag.content.aggregator.ReRankingContentAggregator;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.store.embedding.EmbeddingStore;
@@ -13,6 +17,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
+
+import java.time.Duration;
 
 /**
  * RAG 설정 클래스
@@ -63,6 +69,29 @@ public class EgovRagConfig {
     @Value("${rag.retrieval.hybrid.lexical.word-similarity-threshold:0.30}")
     private double hybridLexicalWordSimilarityThreshold;
 
+    @Value("${rag.reranker.enabled:false}")
+    private boolean rerankerEnabled;
+
+    @Value("${rag.reranker.base-url:}")
+    private String rerankerBaseUrl;
+
+    @Value("${rag.reranker.timeout:10s}")
+    private Duration rerankerTimeout;
+
+    /**
+     * 리랭커가 켜져 있으면, 검색 단계는 최종 top-k가 아니라 이 개수만큼 넉넉히 후보를
+     * 남겨서 리랭커에게 넘긴다(순수 임베딩 유사도만으로 미리 잘라내면 진짜 정답이 이
+     * 단계에서 걸러질 수 있음 - 리랭커를 쓰는 이유 자체가 이걸 보완하기 위해서다).
+     * 리랭커가 이 후보들을 다시 정확히 채점해서 진짜 top-k({@code rag.top-k})만 추린다.
+     */
+    @Value("${rag.reranker.candidate-pool:20}")
+    private int rerankerCandidatePool;
+
+    /** 검색 단계(길이 필터/RRF 융합)가 최종적으로 남기는 후보 개수 - 리랭커 켜짐 여부에 따라 다르다. */
+    private int candidateCount() {
+        return rerankerEnabled ? rerankerCandidatePool : topK;
+    }
+
     /**
      * ContentRetriever 빈 생성
      * EmbeddingStoreContentRetriever를 사용하여 벡터 검색 수행
@@ -78,9 +107,10 @@ public class EgovRagConfig {
             EmbeddingModel embeddingModel,
             JdbcTemplate jdbcTemplate) {
 
-        int overfetchResults = topK * overfetchMultiplier;
-        log.info("ContentRetriever 초기화 - topK: {}, minScore: {}, overfetch: {}, minChunkLength: {}",
-                topK, similarityThreshold, overfetchResults, minChunkLength);
+        int candidateCount = candidateCount();
+        int overfetchResults = candidateCount * overfetchMultiplier;
+        log.info("ContentRetriever 초기화 - topK: {}, 리랭커: {}, candidateCount: {}, minScore: {}, overfetch: {}, minChunkLength: {}",
+                topK, rerankerEnabled, candidateCount, similarityThreshold, overfetchResults, minChunkLength);
 
         ContentRetriever embeddingRetriever = EmbeddingStoreContentRetriever.builder()
                 .embeddingStore(embeddingStore)
@@ -89,11 +119,14 @@ public class EgovRagConfig {
                 .minScore(similarityThreshold)
                 .build();
 
-        // top-k보다 넉넉히 가져온 뒤, 짧은 청크(스퓨리어스 매칭 위험)를 걸러내고 최종 topK로 자른다.
-        ContentRetriever lengthFiltered = new EgovLengthFilteringContentRetriever(embeddingRetriever, minChunkLength, topK);
+        // candidateCount(리랭커 꺼짐: topK 그대로, 켜짐: 더 넉넉한 후보 풀)보다 넉넉히 가져온 뒤,
+        // 짧은 청크(스퓨리어스 매칭 위험)를 걸러내고 candidateCount로 자른다.
+        ContentRetriever lengthFiltered = new EgovLengthFilteringContentRetriever(embeddingRetriever, minChunkLength, candidateCount);
 
-        // 최종 topK로 추려진 뒤에 이웃 청크를 붙인다 - overfetch 단계(topK*overfetchMultiplier개)가
-        // 아니라 이미 topK로 줄어든 결과에만 앞/뒤 청크 조회 쿼리를 실행해 DB 왕복을 최소화한다.
+        // candidateCount로 추려진 뒤에 이웃 청크를 붙인다 - overfetch 단계(candidateCount*overfetchMultiplier개)가
+        // 아니라 이미 candidateCount로 줄어든 결과에만 앞/뒤 청크 조회 쿼리를 실행해 DB 왕복을 최소화한다.
+        // 리랭커가 켜져 있으면 candidateCount가 topK보다 커서(기본 20 vs 5) 그만큼 조회가 늘어나지만,
+        // 리랭커 자체가 가벼운 연산이라 감수할 만하다.
         return new EgovNeighborChunkExpander(lengthFiltered, jdbcTemplate, tableName, chunkSize, neighborExpansionChars);
     }
 
@@ -117,13 +150,42 @@ public class EgovRagConfig {
             JdbcTemplate jdbcTemplate,
             PlatformTransactionManager transactionManager) {
 
-        int effectiveTopK = (hybridTopK != null) ? hybridTopK : topK;
-        log.info("HybridContentRetriever 초기화 - topK: {}, weight(dense/lexical): {}/{}, lexical word_similarity 임계값: {}",
-                effectiveTopK, hybridDenseWeight, hybridLexicalWeight, hybridLexicalWordSimilarityThreshold);
+        int effectiveTopK = (hybridTopK != null) ? hybridTopK : candidateCount();
+        log.info("HybridContentRetriever 초기화 - topK: {}, 리랭커: {}, weight(dense/lexical): {}/{}, lexical word_similarity 임계값: {}",
+                effectiveTopK, rerankerEnabled, hybridDenseWeight, hybridLexicalWeight, hybridLexicalWordSimilarityThreshold);
 
         return new EgovHybridContentRetriever(
                 denseContentRetriever, jdbcTemplate, transactionManager, tableName,
                 hybridDenseWeight, hybridLexicalWeight, hybridLexicalWordSimilarityThreshold, effectiveTopK,
                 minChunkLength, overfetchMultiplier);
+    }
+
+    /**
+     * 리랭커(llama.cpp {@code --reranking} 서버) 호출용 {@link ScoringModel} 빈.
+     * {@code rag.reranker.enabled=true}일 때만 등록된다.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.reranker", name = "enabled", havingValue = "true")
+    public ScoringModel rerankerScoringModel() {
+        log.info("리랭커 ScoringModel 초기화 - baseUrl: {}, timeout: {}, candidatePool: {}",
+                rerankerBaseUrl, rerankerTimeout, rerankerCandidatePool);
+        return new EgovLlamaCppScoringModel(rerankerBaseUrl, rerankerTimeout);
+    }
+
+    /**
+     * 검색 후보(candidateCount개)를 리랭커로 다시 채점해 최종 top-k만 추리는 {@link ContentAggregator} 빈.
+     * 리랭커 호출 실패 시 폴백, {@link EgovKeywordBoostContentRetriever}가 강제 포함시킨 문서 보존은
+     * {@link EgovResilientRerankingAggregator}가 담당한다. minScore는 일부러 안 건다 - bge-reranker
+     * 점수는 0~1이 아니라 원시 로짓(logit)이라 절대 임계값을 잘못 잡으면 정답을 걸러낼 위험이 있다.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.reranker", name = "enabled", havingValue = "true")
+    public ContentAggregator contentAggregator(ScoringModel rerankerScoringModel) {
+        ContentAggregator reRanking = ReRankingContentAggregator.builder()
+                .scoringModel(rerankerScoringModel)
+                .maxResults(topK)
+                .build();
+        return new EgovResilientRerankingAggregator(
+                reRanking, new DefaultContentAggregator(), EgovKeywordBoostContentRetriever.protectedFileNames(), topK);
     }
 }

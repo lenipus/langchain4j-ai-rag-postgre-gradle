@@ -17,6 +17,7 @@ IntelliJ IDEA를 이용해 이 프로젝트(`langchain4j-ai-rag-postgre`, Gradle
   - [8.2 임베딩 모델 설치](#82-임베딩-모델-설치)
   - [8.3 LLM 모델 설치 (Ollama pull)](#83-llm-모델-설치-ollama-pull)
   - [8.4 HuggingFace GGUF 모델 다운로드 → Ollama 등록](#84-huggingface-gguf-모델-다운로드--ollama-등록)
+  - [8.5 리랭커(Reranker) 설치 (선택)](#85-리랭커reranker-설치-선택)
 - [9. 실행 확인](#9-실행-확인)
 - [부록 1. Git 사용법](#부록-1-git-사용법)
 - [부록 2. 루트 폴더의 IDE 전용 파일/폴더](#부록-2-루트-폴더의-ide-전용-파일폴더)
@@ -485,6 +486,7 @@ IntelliJ Run Configuration의 `Environment variables`에 해당하는 부분이 
 |---|---|---|
 | 임베딩 (Retrieval) | `embeddinggemma:300m` (또는 `bge-m3`) | Ollama가 서빙 → LangChain4j `OllamaEmbeddingModel`이 REST API로 호출 |
 | 답변 생성 (Generation) | `qwen3:4b-q4_K_M` | Ollama가 서빙 → LangChain4j `OllamaChatModel`이 REST API로 호출 |
+| 리랭킹 (선택, 8.5) | `bge-reranker-v2-m3` | llama.cpp `llama-server --reranking`이 서빙 → `EgovLlamaCppScoringModel`이 `/v1/rerank` REST API로 호출 |
 
 ### 8.1 Ollama 설치
 
@@ -722,6 +724,99 @@ Ollama 공식 라이브러리에 없는 모델(예: 특정 Text2SQL/코드 특�
    ```
 
    정상 등록됐다면 매번 답변이 반복/특수토큰 노출 없이 깔끔하게 끝나야 한다. 이상하면 3번의 Modelfile 템플릿/stop 토큰부터 재점검한다.
+
+### 8.5 리랭커(Reranker) 설치 (선택)
+
+**왜 필요한가**: dense 벡터 검색(임베딩 코사인 유사도)만으로는 질의 표현과 문서 표현이 의미적으로
+멀면(예: "출장 어떻게 해?" vs "결재라인 안내자료") 진짜 정답 문서가 top-k 밖으로 밀려나는 경우가
+있다. 리랭커는 벡터 검색으로 일단 넉넉히 후보를 가져온 뒤, cross-encoder 모델로 질의-문서 쌍을
+다시 정밀하게 채점해서 최종 top-k를 골라준다 - `rag.reranker.enabled: true`일 때만 동작하고,
+꺼져있으면(기본값) 기존처럼 벡터 검색 순서 그대로 top-k를 쓴다.
+
+**Ollama로는 아직 안 됨**: Ollama는 2026-08 기준 리랭킹 전용 API(`/rerank`)를 지원하지 않는다
+([ollama/ollama#3368](https://github.com/ollama/ollama/issues/3368)). 그래서 리랭커는 Ollama가
+아니라 llama.cpp의 `llama-server`를 `--reranking` 모드로 별도 컨테이너로 띄워 쓴다.
+
+1. **모델 다운로드**
+
+   [bge-reranker-v2-m3-Q8_0-GGUF](https://huggingface.co/YorkieOH10/bge-reranker-v2-m3-Q8_0-GGUF/blob/main/bge-reranker-v2-m3-q8_0.gguf)
+   (636MB)를 받는다. `uv`가 설치돼 있으면 CLI로:
+   ```bash
+   uvx --from "huggingface_hub[cli]" hf download YorkieOH10/bge-reranker-v2-m3-Q8_0-GGUF bge-reranker-v2-m3-q8_0.gguf --local-dir models
+   ```
+   또는 그냥 페이지에서 다운로드 버튼으로 받아 `models` 폴더에 옮겨도 된다.
+
+2. **`docker-compose.yml`로 기동**
+
+   ```yaml
+   services:
+     llama-reranker:
+       image: ghcr.io/ggml-org/llama.cpp:server
+       restart: unless-stopped
+       environment:
+         TZ: Asia/Seoul
+       ports:
+         - "31435:8080"
+       volumes:
+         - ./models:/models
+       command: >
+         --host 0.0.0.0
+         --port 8080
+         -m /models/bge-reranker-v2-m3-q8_0.gguf
+         --embeddings
+         --pooling rank
+         -t 10
+         -c 8192
+         -b 8192
+         -ub 2048
+   ```
+
+   - `--embeddings --pooling rank`는 `--reranking`(둘을 합친 축약형)과 동치다 - `/v1/rerank`
+     엔드포인트를 활성화한다.
+   - `-t`(CPU 스레드)는 WSL2 VM에 할당한 논리 프로세서 수보다 여유 있게 낮게 잡는다(예: WSL2에
+     14개 할당했으면 `-t 10`, 나머지는 다른 컨테이너/윈도우 자체용으로 남김).
+   - `-c`(컨텍스트)/`-b`(물리 배치 크기)는 후보 문서를 여러 개 한 번에 채점하다 보면 기본값
+     512로는 부족해 `input (N tokens) is too large ... increase the physical batch size` 에러가
+     난다 - 모델 최대 컨텍스트(8192)에 맞춰 넉넉히 잡는다.
+   - GPU가 있으면 `image`를 `ghcr.io/ggml-org/llama.cpp:server-cuda`로 바꾸고 `command`에
+     `-ngl 99`를 추가, `nvidia-container-toolkit` 설치 후 `deploy.resources.reservations.devices`로
+     GPU를 예약한다(CPU 전용 `:server` 이미지는 GPU를 아예 못 씀).
+
+   ```bash
+   docker compose up -d
+   ```
+
+3. **동작 확인**
+
+   ```bash
+   curl http://localhost:31435/v1/rerank \
+     -H "Content-Type: application/json" \
+     -d '{"query": "휴가는 어떻게 신청해", "documents": ["휴가 신청 방법: ...", "출장비 지급 기준: ..."]}'
+   ```
+   `results`의 `relevance_score`가 관련 있는 문서일수록 높게(덜 마이너스로) 나오면 정상이다.
+   점수는 0~1 확률이 아니라 원시 로짓(logit)이라 절대값보다 후보 간 상대 순위가 중요하다.
+
+4. **애플리케이션 설정** (`application.yml`)
+
+   ```yaml
+   rag:
+     reranker:
+       enabled: true
+       base-url: http://localhost:31435
+       timeout: 30s          # CPU 채점이라 여유 있게. 타임아웃 나면 candidate-pool을 줄이거나 늘림
+       candidate-pool: 10    # 리랭커에 넘길 후보 수(rag.top-k보다 넉넉하게)
+   ```
+
+   `rag.reranker.enabled=true`일 때만 `EgovRagConfig`의 `ScoringModel`/`ContentAggregator` 빈이
+   등록되고(`ConditionalOnProperty`), `ChatbotFactory`가 이를 `DefaultRetrievalAugmentor`에
+   연결한다. 리랭커 호출이 실패(타임아웃/컨테이너 다운 등)해도 `EgovResilientRerankingAggregator`가
+   예외를 삼키고 원래 검색 순서로 폴백하므로 RAG 응답 자체는 계속 나간다 - 다만 재정렬 품질은
+   그 요청에 한해 포기된다.
+
+   **CPU 전용 환경의 트레이드오프**: candidate-pool(채점할 후보 수)을 늘릴수록 리랭킹 품질(놓치는
+   문서가 줄어듦)은 좋아지지만 CPU 채점 시간이 늘어 타임아웃 위험이 커진다. 타임아웃이 자주 나면
+   `candidate-pool`을 줄이거나(예: 10 → 6), `rag.reranker.timeout`을 늘리거나, 더 나은 하드웨어
+   (GPU가 있는 서버)로 리랭커를 옮기는 걸 고려한다.
 
 ## 9. 실행 확인
 

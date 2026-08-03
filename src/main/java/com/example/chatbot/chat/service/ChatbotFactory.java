@@ -11,6 +11,8 @@ import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
+import dev.langchain4j.rag.content.aggregator.ContentAggregator;
+import dev.langchain4j.rag.content.aggregator.DefaultContentAggregator;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.rag.query.transformer.CompressingQueryTransformer;
@@ -45,6 +47,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChatbotFactory {
 
     private final ContentRetriever selectedRetriever;
+    private final ContentAggregator contentAggregator;
     private final RagRetrievalLogRepository ragRetrievalLogRepository;
     private final PersistentChatMemoryStore chatMemoryStore;
     private final ChatModelGateway chatModelGateway;
@@ -58,10 +61,14 @@ public class ChatbotFactory {
      * @param hybridContentRetriever 하이브리드 검색 빈. {@code rag.retrieval.hybrid.enabled=true}
      *                               일 때만 등록되며 off(기본) 상태에서는 null 이다.
      * @param denseContentRetriever  dense 벡터 검색 빈. 항상 존재한다.
+     * @param contentAggregator      리랭커 기반 재정렬 빈. {@code rag.reranker.enabled=true}일 때만
+     *                               등록되며, off(기본) 상태에서는 null이라 기본 동작(재정렬 없이
+     *                               검색 순서 그대로 top-k 유지)으로 폴백한다.
      */
     public ChatbotFactory(
             @Qualifier("hybridContentRetriever") @Autowired(required = false) ContentRetriever hybridContentRetriever,
             @Qualifier("contentRetriever") ContentRetriever denseContentRetriever,
+            @Autowired(required = false) ContentAggregator contentAggregator,
             PersistentChatMemoryStore chatMemoryStore,
             ChatModelGateway chatModelGateway,
             RagRetrievalLogRepository ragRetrievalLogRepository,
@@ -78,6 +85,7 @@ public class ChatbotFactory {
         // 단계에서 밀려날 일 없이 항상 살아남는다.
         ContentRetriever chosenRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
         this.selectedRetriever = new EgovKeywordBoostContentRetriever(chosenRetriever, jdbcTemplate, embeddingTableName);
+        this.contentAggregator = (contentAggregator != null) ? contentAggregator : new DefaultContentAggregator();
         this.ragRetrievalLogRepository = ragRetrievalLogRepository;
         this.chatMemoryStore = chatMemoryStore;
         this.chatModelGateway = chatModelGateway;
@@ -87,6 +95,7 @@ public class ChatbotFactory {
         if (hybridContentRetriever != null) {
             log.info("ChatbotFactory - 하이브리드 ContentRetriever 사용");
         }
+        log.info("ChatbotFactory - 리랭커 사용 여부: {}", contentAggregator != null);
     }
 
     /**
@@ -133,6 +142,7 @@ public class ChatbotFactory {
         RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
                 .queryTransformer(loggingQueryTransformer(baseTransformer, originalQueryTextHolder))
                 .contentRetriever(loggingRetriever)
+                .contentAggregator(contentAggregator)
                 .build();
         builder.retrievalAugmentor(retrievalAugmentor);
 
