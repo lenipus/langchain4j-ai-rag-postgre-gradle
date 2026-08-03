@@ -129,10 +129,8 @@ rag:
   # 재정렬 없이 기존처럼 검색 순서 그대로 top-k를 쓴다.
   reranker:
     enabled: false
-    base-url: http://localhost:31435
-    timeout: 300s
-    # CPU 전용 리랭커라 후보가 많을수록(특히 -c/-b를 키운 뒤) 30초도 넘기는 게 실측됨 -
-    # 20 -> 10으로 줄여서 채점량 자체를 낮춘다. top-k(5)보다는 여전히 넉넉한 배수(2배)다.
+    base-url: ${RERANKER_BASE_URL:}
+    timeout: 60s
     candidate-pool: 10
 
   # RAG 검색 감사 로그(rag_retrieval_logs, EgovLoggingContentRetriever가 기록) 관련 설정.
