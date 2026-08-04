@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class EgovLoggingContentRetriever implements ContentRetriever {
 
-    private static final int PREVIEW_LENGTH = 200;
+    private static final int PREVIEW_LENGTH = 150;
 
     private final ContentRetriever delegate;
     private final RagRetrievalLogRepository ragRetrievalLogRepository;

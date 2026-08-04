@@ -34,13 +34,24 @@ public class DocumentIdUtil {
                 Path base = Paths.get(documentUploadDir).toAbsolutePath().normalize();
                 Path target = Paths.get(path).toAbsolutePath().normalize();
                 if (target.startsWith(base)) {
-                    path = base.relativize(target).toString();
+                    Path relative = base.relativize(target);
+
+                    if (relative.getNameCount() == 2
+                            && relative.getName(0).toString().equalsIgnoreCase(extensionOf(fallbackFilename))) {
+                        relative = relative.getName(1);
+                    }
+                    path = relative.toString();
                 }
             }
         } catch (IOException e) {
             path = fallbackFilename;
         }
         return path.replaceAll("[\\\\/:*?\"<>|]", "-").replaceAll("\\s+", "-");
+    }
+
+    private String extensionOf(String filename) {
+        int dotIndex = filename.lastIndexOf('.');
+        return dotIndex < 0 ? "" : filename.substring(dotIndex + 1);
     }
 
     /**

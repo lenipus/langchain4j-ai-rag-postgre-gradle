@@ -84,7 +84,7 @@ document:
 
   # 재인덱싱 시 파일 단위 동시 처리 개수 (1 ~ 4)
   processing:
-    concurrency: 1
+    concurrency: 2
 
   normalization:
     enabled: true

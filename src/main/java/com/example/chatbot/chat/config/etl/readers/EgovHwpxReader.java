@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.reader.HWPXReader;
 import kr.dogfoot.hwpxlib.tool.textextractor.TextExtractMethod;
 import kr.dogfoot.hwpxlib.tool.textextractor.TextExtractor;
+import kr.dogfoot.hwpxlib.tool.textextractor.TextMarks;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -66,11 +67,19 @@ public class EgovHwpxReader implements EgovDocumentReader {
             }
 
             HWPXFile hwpxFile = HWPXReader.fromFile(tempFile);
+            // TextMarks를 null로 넘기면 hwpxlib가 문단 구분, 강제 줄바꿈, 표의 행/셀
+            // 구분을 아무 문자도 추가하지 않는 방식으로 처리해 모든 텍스트가 붙는다.
+            TextMarks textMarks = new TextMarks()
+                    .paraSeparatorAnd("\n\n")
+                    .lineBreakAnd("\n")
+                    .tabAnd("\t")
+                    .tableRowSeparatorAnd("\n")
+                    .tableCellSeparatorAnd("\t");
             String content = TextExtractor.extract(
                     hwpxFile,
                     TextExtractMethod.InsertControlTextBetweenParagraphText,
                     false,
-                    null);
+                    textMarks);
 
             if (content == null || content.trim().isEmpty()) {
                 log.warn("HWPX 파일 '{}'에서 추출된 텍스트가 없습니다.", filename);

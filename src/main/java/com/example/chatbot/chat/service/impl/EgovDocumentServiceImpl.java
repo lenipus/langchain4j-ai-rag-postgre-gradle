@@ -19,8 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -194,13 +195,16 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
     public Map<String, Object> uploadMarkdownFiles(MultipartFile[] files) {
         // 결과 맵 초기화
         Map<String, Object> result = new HashMap<>();
+        log.info("문서 업로드 요청 수신: {}개 파일", files == null ? 0 : files.length);
         if (files == null || files.length == 0) {
+            log.warn("문서 업로드 거부: 업로드할 파일이 없습니다.");
             result.put("success", false);
             result.put("message", "업로드할 파일이 없습니다.");
             result.putIfAbsent("files", Collections.emptyList());
             return result;
         }
         if (files.length > 5) {
+            log.warn("문서 업로드 거부: 파일 개수 {}개 (최대 5개)", files.length);
             result.put("success", false);
             result.put("message", "최대 5개 파일만 업로드할 수 있습니다.");
             result.putIfAbsent("files", Collections.emptyList());
@@ -211,6 +215,7 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
         for (MultipartFile file : files) {
             String originalFilename = file.getOriginalFilename();
             if (originalFilename == null || originalFilename.isBlank()) {
+                log.warn("문서 업로드 거부: 파일명이 없는 항목이 포함되어 있습니다.");
                 result.put("success", false);
                 result.put("message", "파일명이 없습니다.");
                 result.putIfAbsent("files", Collections.emptyList());
@@ -220,12 +225,15 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
             String lowerFilename = filename.toLowerCase();
             boolean allowedExtension = Arrays.stream(allowedUploadExtensions).anyMatch(lowerFilename::endsWith);
             if (!allowedExtension) {
+                log.warn("문서 업로드 거부: 허용되지 않은 확장자 ({})", filename);
                 result.put("success", false);
                 result.put("message", String.join(", ", allowedUploadExtensions) + " 파일만 업로드 가능합니다.");
                 result.putIfAbsent("files", Collections.emptyList());
                 return result;
             }
             if (file.getSize() > maxFileSize.toBytes()) {
+                log.warn("문서 업로드 거부: 파일 크기 초과 (파일={}, 크기={} bytes, 제한={} bytes)",
+                        filename, file.getSize(), maxFileSize.toBytes());
                 result.put("success", false);
                 result.put("message", "파일당 최대 " + maxFileSize.toMegabytes() + "MB까지만 업로드할 수 있습니다.");
                 result.putIfAbsent("files", Collections.emptyList());
@@ -234,34 +242,58 @@ public class EgovDocumentServiceImpl extends EgovAbstractServiceImpl implements 
             totalSize += file.getSize();
         }
         if (totalSize > maxRequestSize.toBytes()) {
+            log.warn("문서 업로드 거부: 전체 크기 초과 (크기={} bytes, 제한={} bytes)",
+                    totalSize, maxRequestSize.toBytes());
             result.put("success", false);
             result.put("message", "총 " + maxRequestSize.toMegabytes() + "MB를 초과할 수 없습니다.");
             result.putIfAbsent("files", Collections.emptyList());
             return result;
         }
-        // 저장 경로
-        File dir = new File(documentUploadDir);
-        if (!dir.exists())
-            dir.mkdirs();
+        // 상대 경로를 MultipartFile.transferTo(File)에 넘기면 Tomcat 임시 디렉터리를
+        // 기준으로 해석될 수 있으므로, 저장 루트를 먼저 절대 경로로 확정한다.
+        Path uploadDir = Paths.get(documentUploadDir).toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(uploadDir);
+        } catch (IOException e) {
+            log.error("문서 업로드 디렉터리 생성 실패: configuredPath={}, resolvedPath={}",
+                    documentUploadDir, uploadDir, e);
+            result.put("success", false);
+            result.put("message", "업로드 디렉터리를 준비할 수 없습니다: " + e.getMessage());
+            result.putIfAbsent("files", Collections.emptyList());
+            return result;
+        }
+        log.info("문서 업로드 저장 경로: configuredPath={}, resolvedPath={}", documentUploadDir, uploadDir);
+
         for (MultipartFile file : files) {
             String filename = Paths.get(file.getOriginalFilename()).getFileName().toString();
-            File dest = new File(dir, filename);
+            String extension = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+            Path extensionDir = uploadDir.resolve(extension).normalize();
+            Path dest = extensionDir.resolve(filename).normalize();
             try {
                 // 경로 탐색(Path Traversal) 방어: 저장 경로가 허용된 디렉토리 내인지 검증
-                if (!dest.getCanonicalPath().startsWith(dir.getCanonicalPath() + File.separator)) {
+                if (!dest.startsWith(uploadDir)) {
+                    log.warn("문서 업로드 거부: 허용되지 않는 저장 경로 (파일={}, resolvedPath={})",
+                            filename, dest);
                     result.put("success", false);
                     result.put("message", "허용되지 않는 파일 경로입니다: " + filename);
                     result.putIfAbsent("files", Collections.emptyList());
                     return result;
                 }
+                Files.createDirectories(extensionDir);
                 file.transferTo(dest);
                 uploaded++;
-            } catch (IOException e) {
+                log.info("문서 업로드 저장 완료: 파일={}, 크기={} bytes, 경로={}",
+                        filename, file.getSize(), dest);
+            } catch (IOException | IllegalStateException e) {
+                log.error("문서 업로드 저장 실패: 파일={}, 크기={} bytes, 경로={}",
+                        filename, file.getSize(), dest, e);
                 result.put("success", false);
                 result.put("message", filename + " 저장 실패: " + e.getMessage());
+                result.putIfAbsent("files", Collections.emptyList());
                 return result;
             }
         }
+        log.info("문서 업로드 완료: {}개 파일, 총 {} bytes", uploaded, totalSize);
         result.put("success", true);
         result.put("uploaded", uploaded);
         return result;

@@ -61,7 +61,8 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
     @Override
     public Document transform(Document document) {
         if (!normalizationEnabled) {
-            return document;
+            return Document.from(document.text(), standardizeMetadata(
+                    document.metadata(), document.text().length(), document.text().length(), false));
         }
 
         String originalContent = document.text();
@@ -79,7 +80,13 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
         }
 
         if (normalizeNewlines) {
-            normalizedContent = normalizedContent.replaceAll("\\n{2,}", "\n");
+            // 줄바꿈 형식만 LF로 통일하고, 문단 경계(빈 줄)는 유지한다. 세 줄 이상
+            // 연속된 경우만 두 줄로 줄인다. 두 줄을 한 줄로 합치면 recursive splitter가
+            // 문단 경계를 인식하지 못하고 긴 문장을 다시 합치는 문제가 생긴다.
+            normalizedContent = normalizedContent
+                    .replace("\r\n", "\n")
+                    .replace('\r', '\n')
+                    .replaceAll("\\n{3,}", "\n\n");
         }
 
         // 코드 블록 제거
@@ -95,26 +102,32 @@ public class EgovContentFormatTransformer implements DocumentTransformer {
         // 앞뒤 공백 제거
         normalizedContent = normalizedContent.trim();
 
-        // 내용이 변경된 경우에만 새 Document 생성
-        if (!originalContent.equals(normalizedContent)) {
-            Metadata newMetadata = document.metadata().copy();
-            newMetadata.put("original_length", String.valueOf(originalContent.length()));
-            newMetadata.put("normalized_length", String.valueOf(normalizedContent.length()));
-            newMetadata.put("normalization_applied", "true");
-            newMetadata.put("code_blocks_removed", String.valueOf(removeCodeBlocks));
-            newMetadata.put("special_chars_cleaned", String.valueOf(cleanSpecialChars));
+        Metadata newMetadata = standardizeMetadata(
+                document.metadata(), originalContent.length(), normalizedContent.length(), true);
+        return Document.from(normalizedContent, newMetadata);
+    }
 
-            // if (log.isDebugEnabled()) {
-            //     log.debug("정규화 적용: {} -> {} (길이: {} -> {})",
-            //             originalContent.substring(0, Math.min(50, originalContent.length())),
-            //             normalizedContent.substring(0, Math.min(50, normalizedContent.length())),
-            //             originalContent.length(), normalizedContent.length());
-            // }
+    /**
+     * 리더별 차이와 실제 내용 변경 여부에 상관없이 임베딩 메타데이터의 공통 필드를
+     * 동일하게 만든다. {@code index}는 이후 DocumentSplitter가 청크별로 추가한다.
+     *
+     * <p>LangChain4j Metadata 내부 구현은 HashMap이므로 JSON 키 순서를 데이터 계약으로
+     * 사용할 수는 없다. 이 메서드는 키의 표시 순서가 아니라 키 집합과 의미를 통일한다.</p>
+     */
+    private Metadata standardizeMetadata(Metadata source, int originalLength, int normalizedLength,
+            boolean normalizationApplied) {
+        Metadata metadata = source.copy();
+        metadata.put("original_length", String.valueOf(originalLength));
+        metadata.put("normalized_length", String.valueOf(normalizedLength));
+        metadata.put("normalization_applied", String.valueOf(normalizationApplied));
+        metadata.put("code_blocks_removed", String.valueOf(normalizationApplied && removeCodeBlocks));
+        metadata.put("special_chars_cleaned", String.valueOf(normalizationApplied && cleanSpecialChars));
 
-            return Document.from(normalizedContent, newMetadata);
+        // HWPX/DOCX처럼 페이지 정보가 없는 단일 Document 리더도 동일한 공통 필드를 갖게 한다.
+        if (!metadata.containsKey("page_number")) {
+            metadata.put("page_number", "1");
         }
-
-        return document;
+        return metadata;
     }
 
     @Override

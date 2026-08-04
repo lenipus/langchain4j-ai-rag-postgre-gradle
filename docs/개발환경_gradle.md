@@ -725,6 +725,67 @@ Ollama 공식 라이브러리에 없는 모델(예: 특정 Text2SQL/코드 특�
 
    정상 등록됐다면 매번 답변이 반복/특수토큰 노출 없이 깔끔하게 끝나야 한다. 이상하면 3번의 Modelfile 템플릿/stop 토큰부터 재점검한다.
 
+#### 8.4-1. 컨테이너 + `uv` 없는 환경에서 등록하기 (예: kosiidev02)
+
+위 순서는 로컬(네이티브 Ollama, `uv` 있음) 기준이다. `uv`가 안 깔려있고 Ollama도 컨테이너(Podman/Docker)로 돌고 있는 서버(예: `kosiidev02`의 rootless Podman + Quadlet Ollama)에서는 두 군데를 바꿔야 한다: **다운로드는 `curl`로**, **`ollama create`는 컨테이너 안에서**.
+
+1. **GGUF 파일 다운로드** (`uv`/`hf` 대신 `curl`로 직접)
+
+   ```bash
+   mkdir -p ~/gguf-models/qwen-coder
+   cd ~/gguf-models/qwen-coder
+   curl -L -o qwen2.5-coder-3b-instruct-q4_k_m.gguf \
+     https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf
+   ```
+   (Hugging Face 파일 페이지 URL에서 `blob/main`을 `resolve/main`으로 바꾸면 원본 파일 직접 다운로드 링크가 된다.)
+
+2. **Modelfile 작성** — 내용은 로컬과 동일, `cat`으로 바로 생성
+
+   ```bash
+   cat > qwen-coder.Modelfile <<'EOF'
+   FROM ./qwen2.5-coder-3b-instruct-q4_k_m.gguf
+
+   TEMPLATE """<|im_start|>system
+   {{ .System }}<|im_end|>
+   <|im_start|>user
+   {{ .Prompt }}<|im_end|>
+   <|im_start|>assistant
+   """
+
+   PARAMETER stop "<|im_start|>"
+   PARAMETER stop "<|im_end|>"
+   PARAMETER temperature 0.4
+   EOF
+   ```
+
+3. **컨테이너 안으로 복사** — Ollama가 컨테이너 안에서 도니 `ollama create`도 컨테이너 안에서 실행해야 하고, 그러려면 파일도 컨테이너 안에 있어야 한다 (`podman cp`로 호스트 → 컨테이너 복사)
+
+   ```bash
+   podman exec ollama mkdir -p /tmp/qwen-coder
+   podman cp ~/gguf-models/qwen-coder/. ollama:/tmp/qwen-coder/
+   ```
+
+4. **컨테이너 안에서 `ollama create` 실행** (`-w`로 작업 디렉토리를 지정해 Modelfile의 상대경로 `FROM`이 정상 해석되게 함)
+
+   ```bash
+   podman exec -it -w /tmp/qwen-coder ollama ollama create qwen-coder:qwen2.5-3b-q4km-official -f qwen-coder.Modelfile
+   ```
+
+5. **동작 테스트**
+
+   ```bash
+   podman exec -it ollama ollama run qwen-coder:qwen2.5-3b-q4km-official
+   ```
+   테스트 질의는 위 5번 항목과 동일한 걸 쓰면 된다.
+
+6. **컨테이너 안 임시 파일 정리** — 가중치는 이미 컨테이너 내부의 Ollama 저장소(볼륨)로 복사됐으므로, `/tmp` 임시 파일은 지워도 모델은 남는다
+
+   ```bash
+   podman exec ollama rm -rf /tmp/qwen-coder
+   ```
+
+   호스트 쪽 `~/gguf-models/qwen-coder`(원본 GGUF + Modelfile)는 재현/백업용으로 남겨두는 걸 추천한다.
+
 ### 8.5 리랭커(Reranker) 설치 (선택)
 
 **왜 필요한가**: dense 벡터 검색(임베딩 코사인 유사도)만으로는 질의 표현과 문서 표현이 의미적으로
