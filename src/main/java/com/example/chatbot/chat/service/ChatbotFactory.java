@@ -3,6 +3,7 @@ package com.example.chatbot.chat.service;
 import com.example.chatbot.chat.config.EgovKeywordBoostContentRetriever;
 import com.example.chatbot.chat.config.EgovLoggingContentRetriever;
 import com.example.chatbot.chat.config.SynonymQueryNormalizer;
+import com.example.chatbot.chat.dto.RagProcessingStage;
 import com.example.chatbot.chat.repository.PersistentChatMemoryStore;
 import com.example.chatbot.chat.repository.RagRetrievalLogRepository;
 import com.example.chatbot.sqlgen.service.SqlGenChatbot;
@@ -34,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * 챗봇 인스턴스 생성 Factory
@@ -53,6 +55,7 @@ public class ChatbotFactory {
     private final ChatModelGateway chatModelGateway;
     private final SynonymQueryNormalizer synonymQueryNormalizer;
     private final DateCalculationTool dateCalculationTool;
+    private final boolean rerankingEnabled;
 
     @Value("${rag.query-compression.enabled:true}")
     private boolean queryCompressionEnabled;
@@ -86,6 +89,7 @@ public class ChatbotFactory {
         ContentRetriever chosenRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
         this.selectedRetriever = new EgovKeywordBoostContentRetriever(chosenRetriever, jdbcTemplate, embeddingTableName);
         this.contentAggregator = (contentAggregator != null) ? contentAggregator : new DefaultContentAggregator();
+        this.rerankingEnabled = contentAggregator != null;
         this.ragRetrievalLogRepository = ragRetrievalLogRepository;
         this.chatMemoryStore = chatMemoryStore;
         this.chatModelGateway = chatModelGateway;
@@ -107,7 +111,8 @@ public class ChatbotFactory {
      * @param sessionId 세션 ID (메모리 관리용)
      * @return RagChatbot 인스턴스
      */
-    public RagChatbot createRagChatbot(String modelName, String sessionId) {
+    public RagChatbot createRagChatbot(String modelName, String sessionId,
+                                       Consumer<RagProcessingStage> progressReporter) {
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
 
         // 이 질의(턴) 하나를 위한 키. rag_retrieval_logs와 chat_memory 양쪽에 같은 값이
@@ -123,7 +128,8 @@ public class ChatbotFactory {
         AtomicReference<String> originalQueryTextHolder = new AtomicReference<>();
 
         ContentRetriever loggingRetriever = new EgovLoggingContentRetriever(
-                selectedRetriever, ragRetrievalLogRepository, sessionId, turnId, originalQueryTextHolder);
+                selectedRetriever, ragRetrievalLogRepository, sessionId, turnId,
+                originalQueryTextHolder, progressReporter);
 
         AiServices<RagChatbot> builder = AiServices.builder(RagChatbot.class)
                 .streamingChatModel(streamingModel)
@@ -139,10 +145,18 @@ public class ChatbotFactory {
                 // 완화하기 위해, 검색 전에 (이전 대화 + 현재 질문)을 독립형 질문으로 압축한다.
                 ? new CompressingQueryTransformer(chatModelGateway.getChatModel(modelName))
                 : query -> List.of(query);
+        ContentAggregator progressAggregator = queryToContents -> {
+            progressReporter.accept(rerankingEnabled
+                    ? RagProcessingStage.RERANKING
+                    : RagProcessingStage.ORGANIZING_RESULTS);
+            List<dev.langchain4j.rag.content.Content> aggregated = contentAggregator.aggregate(queryToContents);
+            progressReporter.accept(RagProcessingStage.GENERATING_ANSWER);
+            return aggregated;
+        };
         RetrievalAugmentor retrievalAugmentor = DefaultRetrievalAugmentor.builder()
-                .queryTransformer(loggingQueryTransformer(baseTransformer, originalQueryTextHolder))
+                .queryTransformer(loggingQueryTransformer(baseTransformer, originalQueryTextHolder, progressReporter))
                 .contentRetriever(loggingRetriever)
-                .contentAggregator(contentAggregator)
+                .contentAggregator(progressAggregator)
                 .build();
         builder.retrievalAugmentor(retrievalAugmentor);
 
@@ -157,8 +171,10 @@ public class ChatbotFactory {
      * chat_memory 저장에는 영향 없고, 검색에 쓰이는 텍스트에만 정규화가 적용된다.
      */
     private QueryTransformer loggingQueryTransformer(QueryTransformer delegate,
-                                                      AtomicReference<String> originalQueryTextHolder) {
+                                                      AtomicReference<String> originalQueryTextHolder,
+                                                      Consumer<RagProcessingStage> progressReporter) {
         return query -> {
+            progressReporter.accept(RagProcessingStage.TRANSFORMING_QUERY);
             originalQueryTextHolder.set(query.text());
 
             String normalizedText = synonymQueryNormalizer.normalize(query.text());

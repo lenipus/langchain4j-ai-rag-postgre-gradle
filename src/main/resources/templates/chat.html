@@ -416,12 +416,13 @@
             activeStreamController.aiMessageDiv = newDiv;
 
             if (activeStreamController.thinking) {
-                renderThinkingIndicatorHtml(newDiv, '답변을 작성하고 있어요...');
+                renderThinkingIndicatorHtml(newDiv, activeStreamController.currentStatusMessage
+                    || '질문을 처리할 준비를 하고 있습니다...');
             } else if (activeStreamController.fullResponse) {
                 try {
                     const html = DOMPurify.sanitize(marked.parse(activeStreamController.fullResponse,
                             { breaks: true, gfm: true }));
-                    newDiv.innerHTML = html;
+                    renderStreamingAnswer(newDiv, html);
                 } catch (markdownError) {
                     newDiv.style.whiteSpace = 'pre-wrap';
                     newDiv.innerText = activeStreamController.fullResponse;
@@ -931,13 +932,8 @@
             btn.dataset.resetTimer = String(timer);
         }
 
-        // 응답이 오기 전까지(RAG는 문서검색+LLM추론으로 수십 초까지 걸릴 수 있음) 그냥
-        // '...' 만 떠 있으면 멈춘 것처럼 보이므로, 점 애니메이션 + 순환 문구로 진행 중임을 보여준다.
-        //
-        // 예전엔 "질문을 정리하고 있어요" -> "문서를 검색하고 있어요" -> ... 처럼 실제 처리
-        // 단계인 것처럼 문구를 세분화했었는데, 이건 실제 서버 진행 상황과 무관하게 그냥
-        // 타이머로 순서대로 도는 것뿐이라 오해를 준다는 피드백에 따라 정직하게 문구 2개만
-        // 순환한다(mode 무관 - 실제 단계 추적은 별도로 검토 중).
+        // RAG는 백엔드가 실제 처리 단계(status SSE)를 보내므로 타이머로 문구를 바꾸지 않는다.
+        // 일반/SQL 채팅은 세부 단계를 관찰할 수 없어 기존의 일반적인 대기 문구를 순환한다.
         // 대기 시간이 눈에 보이면 얼마나 더 기다려야 할지 감이라도 잡을 수 있다는 피드백에
         // 따라, 문구 옆에 경과 시간을 (1s), 60초가 넘으면 (1m 2s) 형식으로 같이 보여준다.
         function formatElapsedTime(elapsedMs) {
@@ -953,8 +949,13 @@
         function startThinkingIndicator(mode) {
             const phrases = ['답변을 작성하고 있어요...', '조금만 더 기다려주세요...'];
             const startTime = Date.now();
+            const initialPhrase = mode === 'rag'
+                ? '질문을 처리할 준비를 하고 있습니다...'
+                : phrases[0];
+            activeStreamController.currentStatusMessage = initialPhrase;
+            activeStreamController.startedAt = startTime;
 
-            renderThinkingIndicatorHtml(activeStreamController.aiMessageDiv, phrases[0]);
+            renderThinkingIndicatorHtml(activeStreamController.aiMessageDiv, initialPhrase);
 
             // 대기 단계에서 스크롤을 올려 "답변 작성 중 - 보러 가기" 버튼이 뜨면, 그동안은
             // 아직 아무 토큰도 안 왔으니 같은 문구 대신 경과 시간을 보여준다 - 실제로 답변이
@@ -975,14 +976,16 @@
                     setJumpButtonLabel('답변을 기다리는 중 (' + formatElapsedTime(elapsedMs) + ') - 보러 가기');
                 }
 
-                if (elapsedSeconds > 0 && elapsedSeconds % 4 === 0) {
+                if (mode !== 'rag' && elapsedSeconds > 0 && elapsedSeconds % 4 === 0) {
                     index = (index + 1) % phrases.length;
                 }
 
                 const container = activeStreamController.aiMessageDiv;
                 const textEl = container.querySelector('.thinking-text');
                 if (textEl) {
-                    textEl.textContent = phrases[index];
+                    textEl.textContent = mode === 'rag'
+                        ? activeStreamController.currentStatusMessage
+                        : phrases[index];
                 }
                 const elapsedEl = container.querySelector('.thinking-elapsed');
                 if (elapsedEl) {
@@ -996,6 +999,36 @@
                 '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
                 '<span class="thinking-text">' + phraseText + '</span>' +
                 '<span class="thinking-elapsed">(0s)</span></div>';
+        }
+
+        // 답변 토큰이 도착한 뒤에도 현재 단계("답변을 수신하고 있습니다")를 답변 위에
+        // 작게 유지한다. 완료/오류/중지 때는 finalizeStreamingContent()가 상태 줄을 제거한다.
+        function renderStreamingAnswer(container, answerHtml) {
+            const showStatus = activeStreamController
+                && activeStreamController.mode === 'rag'
+                && activeStreamController.currentStatusMessage;
+            if (!showStatus) {
+                container.innerHTML = answerHtml;
+                return;
+            }
+
+            container.innerHTML = '<div class="thinking-indicator streaming-status">' +
+                '<span class="thinking-dots"><span></span><span></span><span></span></span>' +
+                '<span class="thinking-text"></span>' +
+                '<span class="thinking-elapsed"></span></div>' +
+                '<div class="streaming-answer"></div>';
+            container.querySelector('.thinking-text').textContent = activeStreamController.currentStatusMessage;
+            const elapsedMs = Date.now() - activeStreamController.startedAt;
+            container.querySelector('.thinking-elapsed').textContent = '(' + formatElapsedTime(elapsedMs) + ')';
+            container.querySelector('.streaming-answer').innerHTML = answerHtml;
+        }
+
+        function finalizeStreamingContent(container) {
+            if (!container) return;
+            const status = container.querySelector('.streaming-status');
+            if (status) status.remove();
+            const answer = container.querySelector('.streaming-answer');
+            if (answer) answer.replaceWith(...answer.childNodes);
         }
 
         // 전송 버튼 하나가 상태에 따라 "전송"/"중지" 두 가지 역할을 겸한다 - 지금 보는
@@ -1268,8 +1301,11 @@
             // 보고 있는 세션이 이 스트림의 세션과 같을 때만 스크롤을 건드리기 위해서다.
             activeStreamController = {
                 sessionId: requestParams.sessionId,
+                mode: requestParams.mode,
                 aiMessageDiv: aiMessageDiv,
                 fullResponse: '',
+                currentStatusMessage: null,
+                startedAt: Date.now(),
                 // 첫 토큰이 오기 전(대기 단계)인지 여부 - 점프 버튼 문구를 다르게 보여주는 데 쓴다.
                 thinking: true,
                 thinkingIntervalId: null,
@@ -1281,6 +1317,7 @@
                     eventSource.close();
                     const hadResponse = !!activeStreamController.fullResponse;
                     const targetDiv = activeStreamController.aiMessageDiv;
+                    finalizeStreamingContent(targetDiv);
                     finishStreaming();
                     if (hadResponse) {
                         enhanceCodeBlocks(targetDiv);
@@ -1304,15 +1341,6 @@
                     return;
                 }
 
-                // 첫 토큰이 도착하면 생각 중 표시를 멈춘다(이후 innerHTML이 실제 응답으로 덮어써짐)
-                if (activeStreamController.thinkingIntervalId) {
-                    clearInterval(activeStreamController.thinkingIntervalId);
-                    activeStreamController.thinkingIntervalId = null;
-                    activeStreamController.thinking = false;
-                    // 점프 버튼이 대기 단계 문구(경과 시간 포함)로 떠 있었다면 즉시 갱신한다.
-                    setJumpButtonLabel('답변 작성 중 - 보러 가기');
-                }
-
                 // 지금 화면에 보이는 세션이 이 스트림의 세션과 같을 때만 스크롤을 건드린다 -
                 // 다른 채팅을 보는 중이면 그 화면의 스크롤 위치를 이 스트림이 건드리면 안 된다.
                 const chatContainerEl2 = document.getElementById('chat-container');
@@ -1323,9 +1351,34 @@
                 const targetDiv = activeStreamController.aiMessageDiv;
 
                 try {
-                    // JSON 파싱하여 토큰 추출
+                    // 상태 이벤트는 답변 본문에 합치지 않고 대기 표시만 갱신한다.
                     const data = JSON.parse(event.data);
+                    if (data.type === 'status') {
+                        activeStreamController.currentStatusMessage = data.message;
+                        const textEl = targetDiv.querySelector('.thinking-text');
+                        if (textEl) {
+                            textEl.textContent = data.message;
+                        } else if (!activeStreamController.fullResponse) {
+                            renderThinkingIndicatorHtml(targetDiv, data.message);
+                        }
+                        return;
+                    }
+
                     const token = data.token;
+                    if (typeof token !== 'string') {
+                        return;
+                    }
+
+                    // 첫 토큰부터는 실제 답변을 표시한다. RAG는 "답변 수신" 상태와 경과 시간을
+                    // 답변 위에 유지하고, 일반/SQL 모드는 기존처럼 대기 표시를 제거한다.
+                    if (activeStreamController.thinking) {
+                        activeStreamController.thinking = false;
+                        if (requestParams.mode !== 'rag' && activeStreamController.thinkingIntervalId) {
+                            clearInterval(activeStreamController.thinkingIntervalId);
+                            activeStreamController.thinkingIntervalId = null;
+                        }
+                        setJumpButtonLabel('답변을 수신하고 있습니다 - 보러 가기');
+                    }
 
                     // 디버깅: 처음 20개 토큰만 로깅
                     if (tokenCount < 20) {
@@ -1344,7 +1397,7 @@
                             gfm: true     // GitHub Flavored Markdown 활성화
                         };
                         const html = DOMPurify.sanitize(marked.parse(fullResponse, markedOptions));
-                        targetDiv.innerHTML = html;
+                        renderStreamingAnswer(targetDiv, html);
 
                         // 공백 보존을 위해 모든 p 태그에 white-space: pre-wrap 적용
                         const paragraphs = targetDiv.querySelectorAll('p');
@@ -1402,6 +1455,7 @@
 
                 const fullResponse = activeStreamController.fullResponse;
                 const targetDiv = activeStreamController.aiMessageDiv;
+                finalizeStreamingContent(targetDiv);
                 eventSource.close();
                 finishStreaming();
 
@@ -1435,6 +1489,7 @@
 
                 const targetDiv = activeStreamController.aiMessageDiv;
                 const fullResponse = activeStreamController.fullResponse;
+                finalizeStreamingContent(targetDiv);
                 eventSource.close();
                 finishStreaming();
 

@@ -1,6 +1,8 @@
 package com.example.chatbot.chat.service.impl;
 
 import com.example.chatbot.chat.context.SessionContext;
+import com.example.chatbot.chat.dto.RagProcessingStage;
+import com.example.chatbot.chat.dto.StreamTokenDto;
 import com.example.chatbot.chat.service.EgovChatService;
 import com.example.chatbot.chat.service.ChatbotFactory;
 import com.example.chatbot.chat.service.PendingImageStore;
@@ -16,11 +18,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,46 +61,72 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
      * - langchain4j-reactor가 Flux 변환 자동 처리
      */
     @Override
-    public Flux<String> streamRagResponse(String query, String model, String imageToken) {
+    public Flux<StreamTokenDto> streamRagResponse(String query, String model, String imageToken) {
         String sessionId = SessionContext.getCurrentSessionId();
-        long startTime = System.currentTimeMillis();
         log.info("RAG 스트리밍 질의 시작 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
 
-        try {
-            validateSessionId(sessionId);
-
-            ImageContent image = resolveImageContent(imageToken);
+        // 질의 압축과 검색은 ragChatbot.streamChat()을 호출하는 동안 동기적으로 실행될 수 있다.
+        // Flux.create 안에서 실행해야 그 작업 전에 보낸 상태 이벤트도 이미 연결된 SSE 구독자에게
+        // 즉시 전달되며, 답변 토큰과 동일한 요청 생명주기를 공유할 수 있다.
+        return Flux.<StreamTokenDto>create(sink -> {
+            long startTime = System.currentTimeMillis();
             AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
             AtomicLong answerLength = new AtomicLong(0);
+            AtomicReference<RagProcessingStage> currentStage = new AtomicReference<>();
+            Consumer<RagProcessingStage> progressReporter = stage -> {
+                RagProcessingStage previous = currentStage.getAndSet(stage);
+                if (previous != stage && !sink.isCancelled()) {
+                    log.debug("RAG 처리 단계 변경 - 세션: {}, 단계: {}", sessionId, stage.code());
+                    sink.next(StreamTokenDto.status(stage));
+                }
+            };
 
-            // RAG 챗봇 생성 및 스트리밍 응답 (Flux 직접 반환)
-            return withMemoryConflictRetry(() -> {
-                RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId);
-                Flux<String> stream = image != null
-                        ? ragChatbot.streamChat(query, image)
-                        : ragChatbot.streamChat(query);
-                return stream
-                        .doOnNext(chunk -> {
-                            answerLength.addAndGet(chunk.length());
-                            if (firstChunkReceived.compareAndSet(false, true)) {
+            try {
+                progressReporter.accept(RagProcessingStage.PREPARING);
+                validateSessionId(sessionId);
+                ImageContent image = resolveImageContent(imageToken);
+
+                Flux<String> answerStream = withMemoryConflictRetry(() -> {
+                    RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId, progressReporter);
+                    Flux<String> stream = image != null
+                            ? ragChatbot.streamChat(query, image)
+                            : ragChatbot.streamChat(query);
+                    return stream
+                            .doOnNext(chunk -> answerLength.addAndGet(chunk.length()))
+                            .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
+                                    sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
+                            .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
+                            .transform(s -> applyRetryAndErrorHandling(s, "RAG", sessionId));
+                }, sessionId);
+
+                var subscription = answerStream.subscribe(
+                        chunk -> {
+                            if (firstChunkReceived.compareAndSet(false, true)
+                                    && !chunk.startsWith("\n[오류: ")) {
+                                progressReporter.accept(RagProcessingStage.RECEIVING_ANSWER);
                                 log.info("RAG 답변 수신 시작 - 세션: {}, 소요: {}ms",
                                         sessionId, System.currentTimeMillis() - startTime);
                             }
-                        })
-                        .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
-                                sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
-                        .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
-                        .transform(s -> applyRetryAndErrorHandling(s, "RAG", sessionId));
-            }, sessionId);
-
-        } catch (Exception e) {
-            // 질의 압축(CompressingQueryTransformer) 등은 스트림이 만들어지기 전에 동기적으로
-            // 실행되므로, 컨텍스트 초과 같은 오류가 여기서 터지면 Flux.error()로 그냥 던져서는
-            // 프론트(EventSource)가 원인을 전혀 알 수 없는 연결 끊김으로만 본다. 503 처리와
-            // 동일하게 스트림 안에서 친화적 메시지로 전달한다.
-            log.error("RAG 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
-            return Flux.just("\n[오류: " + friendlyErrorMessage(e) + "]");
-        }
+                            sink.next(StreamTokenDto.token(chunk));
+                        },
+                        error -> {
+                            log.error("RAG 스트리밍 이벤트 전달 오류 - 세션: {}", sessionId, error);
+                            sink.next(StreamTokenDto.token("\n[오류: " + friendlyErrorMessage(error) + "]"));
+                            sink.complete();
+                        },
+                        sink::complete);
+                sink.onCancel(subscription::dispose);
+            } catch (Exception e) {
+                // 질의 압축 등 스트림 생성 전 동기 오류도 정상 SSE 본문으로 전달한다.
+                log.error("RAG 스트리밍 응답 생성 중 오류 - 세션: {}", sessionId, e);
+                sink.next(StreamTokenDto.token("\n[오류: " + friendlyErrorMessage(e) + "]"));
+                sink.complete();
+            }
+        // 질의 압축/임베딩/검색은 동기·블로킹 작업이다. 생산 작업을 boundedElastic으로 옮기고
+        // SSE 신호 전달은 별도 worker에서 처리해야, 한 단계가 오래 걸리는 동안에도 앞서 보낸
+        // 상태 이벤트가 브라우저까지 즉시 flush된다.
+        }).subscribeOn(Schedulers.boundedElastic())
+                .publishOn(Schedulers.parallel());
     }
 
     /**

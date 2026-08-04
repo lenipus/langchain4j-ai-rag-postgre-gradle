@@ -65,8 +65,7 @@ public class EgovChatController {
         // 요청 스레드에서 ThreadLocal 세션 컨텍스트를 정리한다. 이전에는 doFinally
         // 안에서 정리했으나, doFinally는 reactor 스레드에서 실행되어 요청(서블릿)
         // 스레드의 ThreadLocal이 정리되지 않고 워커 스레드에 남는 문제가 있었다.
-        Flux<StreamTokenDto> response = egovChatService.streamRagResponse(message, model, imageToken)
-                .map(StreamTokenDto::new);
+        Flux<StreamTokenDto> response = egovChatService.streamRagResponse(message, model, imageToken);
         SessionContext.clear();
         return response;
     }

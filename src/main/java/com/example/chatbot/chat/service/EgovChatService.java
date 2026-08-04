@@ -1,5 +1,6 @@
 package com.example.chatbot.chat.service;
 
+import com.example.chatbot.chat.dto.StreamTokenDto;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -19,7 +20,7 @@ public interface EgovChatService {
      * @param imageToken 첨부 이미지 토큰({@code PendingImageStore}, 없으면 null) - 비전 지원 모델일 때만 의미 있음
      * @return 스트리밍 응답 Flux
      */
-    Flux<String> streamRagResponse(String query, String model, String imageToken);
+    Flux<StreamTokenDto> streamRagResponse(String query, String model, String imageToken);
 
     /**
      * 세션별 일반 스트리밍 응답 생성

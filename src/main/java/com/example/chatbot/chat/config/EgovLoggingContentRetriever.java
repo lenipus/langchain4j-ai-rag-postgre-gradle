@@ -1,5 +1,6 @@
 package com.example.chatbot.chat.config;
 
+import com.example.chatbot.chat.dto.RagProcessingStage;
 import com.example.chatbot.chat.entity.RagRetrievalLogEntity;
 import com.example.chatbot.chat.repository.RagRetrievalLogRepository;
 import dev.langchain4j.rag.content.Content;
@@ -10,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * ContentRetriever 데코레이터. 실제 검색은 delegate에 그대로 위임하고, LLM에 넘어가는
@@ -44,9 +46,11 @@ public class EgovLoggingContentRetriever implements ContentRetriever {
     private final String sessionId;
     private final String turnId;
     private final AtomicReference<String> originalQueryTextHolder;
+    private final Consumer<RagProcessingStage> progressReporter;
 
     @Override
     public List<Content> retrieve(Query query) {
+        progressReporter.accept(RagProcessingStage.RETRIEVING);
         List<Content> results = delegate.retrieve(query);
 
         if (results.isEmpty()) {

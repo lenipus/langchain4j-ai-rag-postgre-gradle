@@ -400,11 +400,19 @@ h1 {
     align-items: center;
     gap: 8px;
     color: #777;
+    font-size: 13px;
     font-style: italic;
+}
+.streaming-status {
+    margin-bottom: 8px;
 }
 .thinking-dots {
     display: inline-flex;
-    gap: 4px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    width: 31px;
+    height: 18px;
 }
 .thinking-elapsed {
     color: #999;
@@ -412,17 +420,34 @@ h1 {
     font-style: normal;
 }
 .thinking-dots span {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background-color: #999;
-    animation: thinking-bounce 1.4s infinite ease-in-out both;
+    background: linear-gradient(135deg, #78909c, #455a64);
+    transform-origin: center;
+    animation: thinking-wave 1.15s infinite cubic-bezier(0.45, 0, 0.55, 1) both;
 }
-.thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
-.thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
-@keyframes thinking-bounce {
-    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-    40% { transform: scale(1); opacity: 1; }
+.thinking-dots span:nth-child(1) { animation-delay: -0.30s; }
+.thinking-dots span:nth-child(2) { animation-delay: -0.15s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0s; }
+@keyframes thinking-wave {
+    0%, 60%, 100% {
+        transform: translateY(3px) scale(0.72);
+        opacity: 0.35;
+        box-shadow: 0 0 0 rgba(69, 90, 100, 0);
+    }
+    30% {
+        transform: translateY(-5px) scale(1.18);
+        opacity: 1;
+        box-shadow: 0 4px 8px rgba(69, 90, 100, 0.35);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .thinking-dots span {
+        animation: none;
+        opacity: 0.65;
+        transform: none;
+    }
 }
 .admin-panel {
     margin-top: 20px;
