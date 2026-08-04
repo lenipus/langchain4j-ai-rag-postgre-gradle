@@ -78,7 +78,7 @@ pgvector:
 
 document:
   allowed-upload-extensions: .md,.pdf,.docx,.hwp,.hwpx,.txt,.json,.csv,.xls,.xlsx
-  upload-dir: ${DOCUMENT_UPLOAD_PATH:/app/rag/upload}/data
+  upload-dir: ${DOCUMENT_UPLOAD_ROOT_PATH:/app/rag/upload}/data
   chunk-size: 2000
   chunk-overlap: 200
 
