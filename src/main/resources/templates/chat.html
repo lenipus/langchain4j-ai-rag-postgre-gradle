@@ -206,10 +206,17 @@
             <button type="button" class="image-attachment-remove-btn" onclick="clearImageAttachment()" title="첨부 취소">×</button>
         </div>
 
-        <div class="input-container">
-            <textarea class="message-input" id="message-input" rows="1" th:placeholder="'메시지를 입력하세요...'"
-                      onkeydown="handleKeyPress(event)" oninput="autoGrowMessageInput(event)" onpaste="handleMessageInputPaste(event)" ondragover="handleMessageInputDragOver(event)" ondrop="handleMessageInputDrop(event)"></textarea>
-            <button class="send-button" id="send-btn" onclick="handleSendButtonClick()">전송</button>
+        <div class="input-area" id="input-area">
+            <div class="input-container">
+                <textarea class="message-input" id="message-input" rows="1" th:placeholder="'메시지를 입력하세요...'"
+                          onkeydown="handleKeyPress(event)" oninput="autoGrowMessageInput(event)" onpaste="handleMessageInputPaste(event)" ondragover="handleMessageInputDragOver(event)" ondrop="handleMessageInputDrop(event)" disabled></textarea>
+                <button class="send-button" id="send-btn" onclick="handleSendButtonClick()" disabled>전송</button>
+            </div>
+            <!-- 모델 미선택 시 입력창 위에 겹쳐 보이는 비침습적 안내. alert()과 달리 클릭 확인이
+                 필요 없고, 모델을 고르는 순간 자동으로 사라진다(updateMessageInputEnabled 참고). -->
+            <div class="model-required-overlay" id="model-required-overlay" style="display:none;">
+                <span class="model-required-badge"><span class="dot"></span>먼저 모델을 선택해주세요</span>
+            </div>
         </div>
     </div>
 
@@ -306,10 +313,37 @@
             // 채팅 메시지 로드
             loadSessionMessages(sessionId);
 
+            // 이 세션에서 마지막으로 사용한 모델로 복원 (모델 목록이 아직 로드되지 않았으면
+            // loadOllamaModels() 완료 시 다시 시도된다)
+            syncModelSelectionForSession(sessionId);
+
             // 세션 목록 UI 업데이트
             updateSessionListUI();
 
             console.log('세션 전환:', sessionId);
+        }
+
+        /**
+         * 세션에 저장된 마지막 사용 모델로 모델 선택을 복원. 저장된 모델이 없거나 현재
+         * 목록(availableModels)에 없으면 자동으로 아무거나 고르지 않고 선택을 비워
+         * 사용자가 직접 고르게 한다. 모델 목록이 아직 로드되지 않은 상태(availableModels
+         * 비어있음)면 여기서는 아무것도 하지 않고, loadOllamaModels() 완료 시 다시 시도된다.
+         */
+        function syncModelSelectionForSession(sessionId) {
+            const modelSelect = document.getElementById('model-select');
+            if (!modelSelect || availableModels.length === 0) return;
+
+            const session = sessionId ? sessions.get(sessionId) : null;
+            const lastModel = session ? session.lastModel : null;
+
+            if (lastModel && availableModels.includes(lastModel)) {
+                modelSelect.value = lastModel;
+                console.log('세션에 저장된 모델로 복원:', lastModel);
+            } else {
+                modelSelect.value = '';
+                console.log('세션에 저장된 모델이 없어 선택 안 함 상태로 둠');
+            }
+            onModelChange();
         }
 
         /**
@@ -660,7 +694,6 @@
                 .then(data => {
                     if (data.success && data.available) {
                         availableModels = data.models || [];
-                        const defaultModel = data.defaultModel || '';
 
                         // selectbox 옵션 초기화
                         modelSelect.innerHTML = '<option value="">모델을 선택하세요...</option>';
@@ -675,31 +708,20 @@
                             modelSelect.appendChild(option);
                         });
 
-                        // 기본 모델 선택. 기본 모델이 없거나 목록에 없으면 첫 번째 모델을 대신 선택한다.
-                        const hasMatchingDefault = defaultModel && availableModels.includes(defaultModel);
-                        if (hasMatchingDefault) {
-                            modelSelect.value = defaultModel;
-                            selectedModel = defaultModel;
-                            console.log('기본 모델 선택됨:', defaultModel);
-                        } else if (availableModels.length > 0) {
-                            modelSelect.value = availableModels[0];
-                            selectedModel = availableModels[0];
-                            console.log('기본 모델이 없거나 목록에 없어 첫 번째 모델 선택됨:', selectedModel);
-                        }
-
                         modelSelect.disabled = false;
 
-                        // 상태 메시지 업데이트 - 정상적으로 찾은 경우는 특별히 알려줄 내용이 없으니
-                        // 비워두고, 모델이 하나도 없을 때만(관리자가 조치해야 하는 상황) 안내한다.
-                        if (availableModels.length > 0) {
-                            modelStatus.textContent = '';
-                            modelStatus.className = 'model-status';
-                        } else {
+                        // 세션 전환이 모델 목록 로드보다 먼저 끝났을 수 있으므로, 목록이 준비된
+                        // 지금 현재 세션에 저장된 모델을 다시 반영한다. 저장된 모델이 없거나 목록에
+                        // 더 이상 없으면 자동으로 아무거나 고르지 않고 사용자가 직접 선택하게 비워둔다.
+                        syncModelSelectionForSession(currentSessionId);
+
+                        // 설치된 모델 자체가 하나도 없는 경우(관리자가 조치해야 하는 상황)만 별도 안내한다.
+                        if (availableModels.length === 0) {
                             modelStatus.textContent = '설치된 모델이 없습니다';
                             modelStatus.className = 'model-status warning';
                         }
 
-                        console.log('Ollama 모델 목록 로드 완료:', availableModels, '기본 모델:', defaultModel);
+                        console.log('Ollama 모델 목록 로드 완료:', availableModels);
 
                     } else {
                         // Ollama 사용 불가능한 경우
@@ -747,8 +769,33 @@
                 modelStatus.textContent = `선택된 모델: ${selectedModel}`;
                 modelStatus.className = 'model-status success';
             } else {
-                modelStatus.textContent = '기본 모델 사용';
+                modelStatus.textContent = '모델을 선택하세요';
                 modelStatus.className = 'model-status warning';
+            }
+
+            updateMessageInputEnabled();
+        }
+
+        /**
+         * 모델이 선택되지 않은 동안 메시지 입력창/전송 버튼을 비활성화한다. 단, 지금 세션이
+         * 스트리밍 중이면(전송 버튼이 "중지" 역할) 모델 선택 여부와 무관하게 눌러서 중지할 수
+         * 있어야 하므로 버튼은 비활성화하지 않는다.
+         */
+        function updateMessageInputEnabled() {
+            const input = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            const overlay = document.getElementById('model-required-overlay');
+            const hasModel = !!(selectedModel && selectedModel.trim() !== '');
+            const streamingThisSession = activeStreamController && activeStreamController.sessionId === currentSessionId;
+
+            if (input) {
+                input.disabled = !hasModel;
+            }
+            if (sendBtn) {
+                sendBtn.disabled = streamingThisSession ? false : !hasModel;
+            }
+            if (overlay) {
+                overlay.style.display = hasModel ? 'none' : 'flex';
             }
         }
 
@@ -1059,7 +1106,7 @@
                 sendBtn.classList.remove('stop-mode');
                 sendBtn.removeAttribute('title');
             }
-            sendBtn.disabled = false;
+            updateMessageInputEnabled();
         }
 
         // 이미지 파일 하나를 읽어 pendingImage로 등록하고 미리보기를 띄운다.
@@ -1290,7 +1337,7 @@
                 sendBtn.textContent = '전송';
                 sendBtn.classList.remove('stop-mode');
                 sendBtn.removeAttribute('title');
-                sendBtn.disabled = false;
+                updateMessageInputEnabled();
                 hideJumpToLatestButton();
             }
 

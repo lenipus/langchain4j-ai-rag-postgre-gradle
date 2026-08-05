@@ -59,7 +59,7 @@ public class EgovChatController {
             @RequestParam(value = "imageToken", required = false) String imageToken) {
         log.info("RAG 기반 스트리밍 질의 수신: {}, 모델: {}, 세션: {}", message, model, sessionId);
 
-        bootstrapSession(sessionId, message);
+        bootstrapSession(sessionId, message, model);
 
         // 서비스가 sessionId를 동기적으로 읽어 처리하므로, 스트림을 반환하기 전
         // 요청 스레드에서 ThreadLocal 세션 컨텍스트를 정리한다. 이전에는 doFinally
@@ -81,7 +81,7 @@ public class EgovChatController {
             @RequestParam(value = "imageToken", required = false) String imageToken) {
         log.info("일반 스트리밍 질의 수신: {}, 모델: {}, 세션: {}", message, model, sessionId);
 
-        bootstrapSession(sessionId, message);
+        bootstrapSession(sessionId, message, model);
 
         // 일반 스트리밍 응답 생성 (RAG 없이)
         // 서비스가 sessionId를 동기적으로 읽어 처리하므로, 스트림을 반환하기 전
@@ -108,7 +108,7 @@ public class EgovChatController {
         log.info("SQL 생성 스트리밍 질의 수신: {}, 모델: {}, 세션: {}, 연결: {}, 테이블: {}",
                 message, model, sessionId, connectionId, tableNames);
 
-        bootstrapSession(sessionId, message);
+        bootstrapSession(sessionId, message, model);
 
         Flux<StreamTokenDto> response = egovChatService.streamSqlGenResponse(message, model, connectionId, tableNames)
                 .map(StreamTokenDto::new);
@@ -119,9 +119,10 @@ public class EgovChatController {
     /**
      * 세 스트리밍 엔드포인트가 공통으로 수행하는 세션 컨텍스트 설정.
      * 유효한 세션 ID면 SessionContext에 설정하고(첫 메시지면 제목 생성, 아니면 마지막
-     * 메시지 시각 갱신), 없거나 무효하면 기본("default") 세션으로 처리한다.
+     * 메시지 시각 갱신), 없거나 무효하면 기본("default") 세션으로 처리한다. 이번 요청에서
+     * 사용한 모델도 세션에 함께 저장해, 다음에 이 세션을 열 때 프론트엔드가 복원할 수 있게 한다.
      */
-    private void bootstrapSession(String sessionId, String message) {
+    private void bootstrapSession(String sessionId, String message, String model) {
         if (sessionId != null && !sessionId.isEmpty()) {
             log.debug("세션 ID 검증 시작: {}", sessionId);
             if (egovChatSessionService.sessionExists(sessionId)) {
@@ -139,6 +140,8 @@ public class EgovChatController {
                     // 마지막 메시지 시간 업데이트
                     egovChatSessionService.updateLastMessageTime(sessionId);
                 }
+
+                egovChatSessionService.updateSessionModel(sessionId, model);
             } else {
                 log.warn("존재하지 않는 세션 ID: {}, 기본 세션으로 처리", sessionId);
                 // 존재하지 않는 세션 ID인 경우 기본 세션으로 처리

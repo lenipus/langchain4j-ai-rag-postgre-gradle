@@ -49,6 +49,15 @@ public interface EgovChatSessionService {
     void updateLastMessageTime(String sessionId);
 
     /**
+     * 세션에서 마지막으로 사용한 모델을 업데이트. 다음에 이 세션을 열 때
+     * 프론트엔드가 이 값으로 모델 선택을 복원한다.
+     *
+     * @param sessionId 세션 ID
+     * @param model     사용한 모델명
+     */
+    void updateSessionModel(String sessionId, String model);
+
+    /**
      * 첫 메시지를 기반으로 세션 제목을 생성
      *
      * @param firstMessage 첫 메시지

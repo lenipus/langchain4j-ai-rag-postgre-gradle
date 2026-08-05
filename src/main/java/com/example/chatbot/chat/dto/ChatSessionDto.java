@@ -20,6 +20,8 @@ public class ChatSessionDto {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime lastMessageAt;
 
+    private String lastModel;
+
     public ChatSessionDto(String sessionId, String title, LocalDateTime createdAt) {
         this.sessionId = sessionId;
         this.title = title;

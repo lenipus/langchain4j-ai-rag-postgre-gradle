@@ -346,10 +346,44 @@ h1 {
     margin-top: 6px;
     object-fit: cover;
 }
+.input-area {
+    position: relative;
+    margin-top: 10px;
+}
 .input-container {
     display: flex;
     align-items: flex-end;
-    margin-top: 10px;
+}
+.model-required-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    padding-left: 14px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(1.5px);
+    pointer-events: none;
+}
+.model-required-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    background-color: #fff8ec;
+    border: 1px solid #f0c987;
+    color: #9a6400;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(154, 100, 0, 0.12);
+}
+.model-required-badge .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #f0a500;
+    flex: none;
 }
 .message-input {
     flex: 1;

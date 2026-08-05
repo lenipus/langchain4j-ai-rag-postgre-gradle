@@ -64,7 +64,8 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                         entity.getSessionId(),
                         entity.getTitle(),
                         entity.getCreatedAt(),
-                        entity.getUpdatedAt()))
+                        entity.getUpdatedAt(),
+                        entity.getLastModel()))
                 .collect(Collectors.toList());
     }
 
@@ -105,6 +106,21 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
         chatSessionRepository.findById(sessionId).ifPresent(entity -> {
             entity.setUpdatedAt(LocalDateTime.now());
             chatSessionRepository.save(entity);
+        });
+    }
+
+    @Override
+    @Transactional
+    public void updateSessionModel(String sessionId, String model) {
+        if (model == null || model.isBlank()) {
+            return;
+        }
+        chatSessionRepository.findById(sessionId).ifPresent(entity -> {
+            if (!model.equals(entity.getLastModel())) {
+                entity.setLastModel(model);
+                chatSessionRepository.save(entity);
+                log.debug("세션 {} 마지막 사용 모델 업데이트: {}", sessionId, model);
+            }
         });
     }
 

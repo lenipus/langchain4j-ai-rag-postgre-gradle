@@ -21,6 +21,9 @@ public class ChatSessionEntity {
     @Column(name = "title", length = 500)
     private String title;
 
+    @Column(name = "last_model", length = 200)
+    private String lastModel;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
