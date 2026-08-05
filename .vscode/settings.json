@@ -1,5 +1,8 @@
 {
   "java.jdt.ls.java.home": "D:\\PROJ_KOSII\\java\\jdk-21.0.11+10",
+  "java.import.gradle.enabled": true,
+  "java.import.maven.enabled": false,
+  "java.import.generatesMetadataFilesAtProjectRoot": true,
   "java.import.gradle.java.home": "D:\\PROJ_KOSII\\java\\jdk-21.0.11+10",
   "java.configuration.runtimes": [
     {
@@ -15,7 +18,9 @@
   "java.compile.nullAnalysis.mode": "automatic",
   "java.configuration.updateBuildConfiguration": "interactive",
   "java.jdt.ls.vmargs": "-XX:+UseParallelGC -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -Dsun.zip.disableMemoryMapping=true -Xmx4G -Xms100m -Xlog:disable",
+  "java.configuration.maven.globalSettings": "D:\\PROJ_KOSII\\apache-maven\\apache-maven-3.9.16\\conf\\settings.xml",
   "maven.executable.path": "D:\\PROJ_KOSII\\apache-maven\\apache-maven-3.9.16\\bin\\mvn.cmd",
+  "maven.settingsFile": "D:\\PROJ_KOSII\\apache-maven\\apache-maven-3.9.16\\conf\\settings.xml",
   "maven.terminal.customEnv": [
     {
       "environmentVariable": "JAVA_HOME",
