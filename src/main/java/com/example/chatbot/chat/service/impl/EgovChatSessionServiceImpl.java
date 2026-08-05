@@ -85,6 +85,7 @@ public class EgovChatSessionServiceImpl extends EgovAbstractServiceImpl implemen
                                 : entity.getContent(),
                         entity.getImageBase64(),
                         entity.getImageMimeType(),
+                        entity.getModel(),
                         entity.getCreatedAt()))
                 .collect(Collectors.toList());
     }

@@ -18,6 +18,9 @@ public class ChatMessageDto {
     private String imageBase64;
     private String imageMimeType;
 
+    /** 이 답변을 생성한 모델명. ASSISTANT 메시지에만 채워진다(USER는 null). */
+    private String model;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime timestamp;
 

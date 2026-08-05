@@ -116,7 +116,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     @Override
     @Transactional
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
-        updateMessages(memoryId, messages, null);
+        updateMessages(memoryId, messages, null, null);
     }
 
     /**
@@ -125,9 +125,10 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
      * @param memoryId 세션 ID
      * @param messages 저장할 메시지 리스트 (마지막 원소 = 방금 추가된 메시지)
      * @param turnId   이번 질의(턴)의 고유 키. null이면 turn_id를 찍지 않는다(RAG 미사용 흐름).
+     * @param model    이번 턴에 실제로 사용한 모델명. ASSISTANT 메시지에만 채워진다.
      */
     @Transactional
-    public void updateMessages(Object memoryId, List<ChatMessage> messages, String turnId) {
+    public void updateMessages(Object memoryId, List<ChatMessage> messages, String turnId, String model) {
         String sessionId = memoryId.toString();
         // log.debug("채팅 메모리 업데이트 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
 
@@ -155,9 +156,10 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         int lastIndex = messages.size() - 1;
         for (int i = 0; i < messages.size(); i++) {
             boolean isLatest = (i == lastIndex);
-            // 이미 있던 메시지는 예전 turn_id를 이어받고, 이번에 새로 생긴 메시지만 이번 turnId를 찍는다.
+            // 이미 있던 메시지는 예전 turn_id/model을 이어받고, 이번에 새로 생긴 메시지만 이번 값을 찍는다.
             String effectiveTurnId = (i < existingCount) ? existing.get(i).getTurnId() : turnId;
-            ChatMemoryEntity entity = convertToEntity(sessionId, messages.get(i), isLatest, effectiveTurnId);
+            String effectiveModel = (i < existingCount) ? existing.get(i).getModel() : model;
+            ChatMemoryEntity entity = convertToEntity(sessionId, messages.get(i), isLatest, effectiveTurnId, effectiveModel);
             if (entity != null) {
                 chatMemoryRepository.save(entity);
             }
@@ -204,8 +206,10 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
      * @param isLatest 이 배치에서 방금 추가된(가장 마지막) 메시지인지 여부. 사용자 메시지이면서
      *                 이게 false일 때만(=과거 턴) RAG 삽입 텍스트를 잘라낸다.
      * @param turnId   이 메시지가 속한 질의(턴)의 고유 키 (없으면 null)
+     * @param model    이 메시지가 ASSISTANT일 때 실제로 사용한 모델명 (없으면 null)
      */
-    private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message, boolean isLatest, String turnId) {
+    private ChatMemoryEntity convertToEntity(String sessionId, ChatMessage message, boolean isLatest,
+                                              String turnId, String model) {
         String messageType;
         String content;
         ImageContent image = null;
@@ -232,6 +236,9 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
 
         ChatMemoryEntity entity = new ChatMemoryEntity(sessionId, messageType, content);
         entity.setTurnId(turnId);
+        if ("ASSISTANT".equals(messageType)) {
+            entity.setModel(model);
+        }
         if (image != null) {
             entity.setImageBase64(image.image().base64Data());
             entity.setImageMimeType(image.image().mimeType());

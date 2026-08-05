@@ -114,6 +114,7 @@ public class ChatbotFactory {
     public RagChatbot createRagChatbot(String modelName, String sessionId,
                                        Consumer<RagProcessingStage> progressReporter) {
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
+        String resolvedModelName = chatModelGateway.resolveModelName(modelName);
 
         // 이 질의(턴) 하나를 위한 키. rag_retrieval_logs와 chat_memory 양쪽에 같은 값이
         // 찍혀서, "이 질문/답변에 실제로 RAG가 뭘 검색해줬는지"를 정확히 조인해 추적할 수 있다.
@@ -135,7 +136,7 @@ public class ChatbotFactory {
                 .streamingChatModel(streamingModel)
                 .systemMessageProvider(memoryId -> RagChatbot.RAG_SYSTEM_PROMPT + "\n\n" + currentDateContext())
                 .tools(dateCalculationTool)
-                .chatMemory(createChatMemory(sessionId, turnId));
+                .chatMemory(createChatMemory(sessionId, turnId, resolvedModelName));
 
         // 동의어 정규화(SynonymQueryNormalizer)는 질의 압축 여부와 무관하게 항상 거쳐야
         // 검색 텍스트에 반영되므로, 압축이 꺼져있어도 QueryTransformer를 그대로 둔다
@@ -200,14 +201,15 @@ public class ChatbotFactory {
      */
     public SimpleChatbot createSimpleChatbot(String modelName, String sessionId) {
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
+        String resolvedModelName = chatModelGateway.resolveModelName(modelName);
 
-        log.info("Simple 챗봇 생성 - 모델: {}, 세션: {}", chatModelGateway.resolveModelName(modelName), sessionId);
+        log.info("Simple 챗봇 생성 - 모델: {}, 세션: {}", resolvedModelName, sessionId);
 
         return AiServices.builder(SimpleChatbot.class)
                 .streamingChatModel(streamingModel)
                 .systemMessageProvider(memoryId -> SimpleChatbot.SIMPLE_SYSTEM_PROMPT + "\n\n" + currentDateContext())
                 .tools(dateCalculationTool)
-                .chatMemory(createChatMemory(sessionId))
+                .chatMemory(createChatMemory(sessionId, resolvedModelName))
                 .build();
     }
 
@@ -261,12 +263,13 @@ public class ChatbotFactory {
      */
     public SqlGenChatbot createSqlGenChatbot(String modelName, String sessionId) {
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
+        String resolvedModelName = chatModelGateway.resolveModelName(modelName);
 
-        log.info("SQL 생성 챗봇 생성 - 모델: {}, 세션: {}", chatModelGateway.resolveModelName(modelName), sessionId);
+        log.info("SQL 생성 챗봇 생성 - 모델: {}, 세션: {}", resolvedModelName, sessionId);
 
         return AiServices.builder(SqlGenChatbot.class)
                 .streamingChatModel(streamingModel)
-                .chatMemory(createChatMemory(sessionId))
+                .chatMemory(createChatMemory(sessionId, resolvedModelName))
                 .build();
     }
 
@@ -280,33 +283,35 @@ public class ChatbotFactory {
     private static final int CHAT_MEMORY_WINDOW_UNLIMITED = 100_000;
 
     /**
-     * MessageWindowChatMemory 생성 (턴 키 없이 - 단순 채팅용)
-     * - PersistentChatMemoryStore를 통해 PostgreSQL에 자동 저장
+     * MessageWindowChatMemory 생성 (턴 키 없이 - 단순 채팅/SQL 생성용)
+     * - chatMemoryStore를 modelName으로 감싸, 이 세션에서 저장되는 ASSISTANT 메시지에
+     *   실제 사용한 모델명이 찍히게 한다(화면에 모델 배지로 표시하기 위함).
      */
-    private MessageWindowChatMemory createChatMemory(String sessionId) {
+    private MessageWindowChatMemory createChatMemory(String sessionId, String modelName) {
         return MessageWindowChatMemory.builder()
                 .id(sessionId)
                 .maxMessages(CHAT_MEMORY_WINDOW_UNLIMITED)
-                .chatMemoryStore(chatMemoryStore)
+                .chatMemoryStore(new TurnTaggingChatMemoryStore(chatMemoryStore, null, modelName))
                 .build();
     }
 
     /**
      * MessageWindowChatMemory 생성 (RAG용)
-     * - chatMemoryStore를 turnId로 감싸, 이 턴에서 저장되는 메시지에 turnId가 찍히게 한다.
+     * - chatMemoryStore를 turnId/modelName으로 감싸, 이 턴에서 저장되는 메시지에
+     *   turnId와(ASSISTANT 메시지는) 모델명이 찍히게 한다.
      */
-    private MessageWindowChatMemory createChatMemory(String sessionId, String turnId) {
+    private MessageWindowChatMemory createChatMemory(String sessionId, String turnId, String modelName) {
         return MessageWindowChatMemory.builder()
                 .id(sessionId)
                 .maxMessages(CHAT_MEMORY_WINDOW_UNLIMITED)
-                .chatMemoryStore(new TurnTaggingChatMemoryStore(chatMemoryStore, turnId))
+                .chatMemoryStore(new TurnTaggingChatMemoryStore(chatMemoryStore, turnId, modelName))
                 .build();
     }
 
     /**
      * {@link ChatMemoryStore} 데코레이터. updateMessages()만 가로채 이번 질의(턴)의
-     * turnId를 넘겨주고, 나머지는 delegate에 그대로 위임한다. createRagChatbot() 호출마다
-     * 새로 만들어져 turnId를 클로저로 들고 있으므로, 실제 저장이 어느 스레드에서
+     * turnId/modelName을 넘겨주고, 나머지는 delegate에 그대로 위임한다. create*Chatbot() 호출마다
+     * 새로 만들어져 turnId/modelName을 클로저로 들고 있으므로, 실제 저장이 어느 스레드에서
      * 일어나든(ThreadLocal과 달리) 안전하게 전달된다.
      */
     @RequiredArgsConstructor
@@ -314,6 +319,7 @@ public class ChatbotFactory {
 
         private final PersistentChatMemoryStore delegate;
         private final String turnId;
+        private final String modelName;
 
         @Override
         public List<ChatMessage> getMessages(Object memoryId) {
@@ -322,7 +328,7 @@ public class ChatbotFactory {
 
         @Override
         public void updateMessages(Object memoryId, List<ChatMessage> messages) {
-            delegate.updateMessages(memoryId, messages, turnId);
+            delegate.updateMessages(memoryId, messages, turnId, modelName);
         }
 
         @Override
