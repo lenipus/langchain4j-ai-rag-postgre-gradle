@@ -1,3 +1,23 @@
+/* 한글/영문이 같은 톤(굵기·비례)으로 어울려 보이도록 라틴 글리프까지 자체 제작된 한글 웹폰트.
+   CDN 의존 없이 이 저장소 안에 웹폰트 파일을 두고 직접 서빙한다(필요한 굵기만 내려받음). */
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/Pretendard-Regular.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 500;
+    font-display: swap;
+    src: url('/fonts/Pretendard-Medium.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Pretendard';
+    font-weight: 700;
+    font-display: swap;
+    src: url('/fonts/Pretendard-Bold.woff2') format('woff2');
+}
 body {
     font-family: 'Noto Sans KR', Arial, sans-serif;
     margin: 0;
@@ -40,12 +60,13 @@ body {
 }
 .sidebar {
     width: 350px;
-    background-color: #2c3e50;
-    color: white;
+    background-color: #f5f7fa;
+    color: #1f2937;
     padding: 20px;
     display: flex;
     flex-direction: column;
-    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    border-right: 1px solid #e2e8f0;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.06);
 }
 .main-content {
     flex: 1;
@@ -158,6 +179,7 @@ h1 {
     50% { transform: translateY(3px); }
 }
 .message {
+    font-family: 'Pretendard', 'Noto Sans KR', Arial, sans-serif;
     margin-bottom: 20px;
     padding: 6px 12px;
     border-radius: 5px;
@@ -169,6 +191,7 @@ h1 {
 }
 .user-message {
     background-color: #dcf8c6;
+    font-size: 14px;
     margin-left: auto;
     text-align: left;
     /* .message의 max-width: 80%는 상한일 뿐, 블록 요소라 기본은 그 상한까지 항상
@@ -178,6 +201,7 @@ h1 {
 }
 .ai-message {
     background-color: #f0f0f0;
+    font-size: 14px;
     /* marked.js는 블록 태그(</table>, <hr>, </p> 등) 사이사이에 개행 문자를 넣어 HTML을
        내보낸다. 부모(.message)의 white-space: pre-wrap을 그대로 물려받으면 이 개행이
        진짜 빈 줄로 렌더링되어 블록 사이 간격이 실제 마진값보다 훨씬 커 보인다("여백이 너무
@@ -499,23 +523,24 @@ h1 {
 .admin-panel {
     margin-top: 20px;
     padding: 15px;
-    border: 1px solid #34495e;
-    border-radius: 5px;
-    background-color: #34495e;
-    color: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background-color: white;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    color: #1f2937;
 }
 .admin-panel h3 {
-    color: #ecf0f1;
+    color: #1f2937;
     margin: 0 0 15px 0;
     font-size: 14px;
     font-weight: bold;
 }
 .admin-button {
     padding: 8px 12px;
-    background-color: #3498db;
+    background-color: #3b82f6;
     color: white;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     margin: 5px 5px 5px 0;
     font-size: 12px;
@@ -523,7 +548,7 @@ h1 {
     display: block;
 }
 .admin-button:hover {
-    background-color: #2980b9;
+    background-color: #2563eb;
 }
 .admin-button:disabled {
     background-color: #7f8c8d;
@@ -640,7 +665,7 @@ h1 {
     color: #ffc107;
 }
 .new-chat-btn {
-    background-color: #3498db;
+    background-color: #3b82f6;
     color: white;
     border: none;
     padding: 12px 16px;
@@ -654,13 +679,13 @@ h1 {
     gap: 8px;
 }
 .new-chat-btn:hover {
-    background-color: #2980b9;
+    background-color: #2563eb;
 }
 .sessions-header {
     font-size: 14px;
     font-weight: bold;
     margin-bottom: 15px;
-    color: #bdc3c7;
+    color: #6b7280;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -671,18 +696,22 @@ h1 {
 .session-item {
     padding: 8px 12px;
     margin-bottom: 8px;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    background-color: #32465b;
-    border: 1px solid #3d5166;
+    transition: all 0.15s ease;
+    background-color: white;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 .session-item:hover {
-    background-color: #34495e;
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 .session-item.active {
-    background-color: #3498db;
-    border-color: #2980b9;
+    background-color: #3b82f6;
+    border-color: #3b82f6;
+    box-shadow: 0 2px 10px rgba(59, 130, 246, 0.35);
 }
 .session-row {
     display: flex;
@@ -694,29 +723,37 @@ h1 {
     min-width: 0;
     font-size: 14px;
     font-weight: 500;
+    color: #1f2937;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.session-item.active .session-title {
+    color: white;
+}
 .session-time {
     font-size: 12px;
-    color: #95a5a6;
+    color: #9ca3af;
     flex-shrink: 0;
 }
 .session-item.active .session-time {
-    color: #ecf0f1;
+    color: #e0ecff;
 }
 .session-action-btn {
     background: none;
-    border: 1px solid #7f8c8d;
-    color: #bdc3c7;
+    border: 1px solid #d1d5db;
+    color: #6b7280;
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: 6px;
     font-size: 11px;
     cursor: pointer;
     opacity: 0;
     transition: opacity 0.2s ease;
     flex-shrink: 0;
+}
+.session-item.active .session-action-btn {
+    border-color: rgba(255, 255, 255, 0.5);
+    color: white;
 }
 .session-item:hover .session-action-btn,
 .session-item.active .session-action-btn {
