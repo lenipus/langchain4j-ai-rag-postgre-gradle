@@ -65,12 +65,14 @@ public class EgovLoggingContentRetriever implements ContentRetriever {
                 : query.text();
 
         for (Content content : results) {
+            String id = content.textSegment().metadata().getString("id");
+            String index = content.textSegment().metadata().getString("index");
             String fileName = content.textSegment().metadata().getString("file_name");
             Object score = content.metadata().get(dev.langchain4j.rag.content.ContentMetadata.SCORE);
             String text = content.textSegment().text();
             String preview = text.length() > PREVIEW_LENGTH ? text.substring(0, PREVIEW_LENGTH) + "..." : text;
 
-            log.info("  - file={}, score={}, length={}, text={}", fileName, score, text.length(), preview);
+            log.info("  - id={}, index={}, file={}, score={}, length={}, text={}", id, index, fileName, score, text.length(), preview);
 
             persistLog(sessionId, query.text(), originalQueryText, fileName, score, text);
         }
