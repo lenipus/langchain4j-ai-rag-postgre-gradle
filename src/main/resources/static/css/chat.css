@@ -188,10 +188,11 @@ h1 {
     word-break: break-word;
     overflow-wrap: break-word;
     white-space: pre-wrap;
+    line-height: 1.5;
 }
 .user-message {
     background-color: #dcf8c6;
-    font-size: 14px;
+    font-size: 15px;
     margin-left: auto;
     text-align: left;
     /* .message의 max-width: 80%는 상한일 뿐, 블록 요소라 기본은 그 상한까지 항상
@@ -201,7 +202,7 @@ h1 {
 }
 .ai-message {
     background-color: #f0f0f0;
-    font-size: 14px;
+    font-size: 15px;
     /* marked.js는 블록 태그(</table>, <hr>, </p> 등) 사이사이에 개행 문자를 넣어 HTML을
        내보낸다. 부모(.message)의 white-space: pre-wrap을 그대로 물려받으면 이 개행이
        진짜 빈 줄로 렌더링되어 블록 사이 간격이 실제 마진값보다 훨씬 커 보인다("여백이 너무
@@ -292,7 +293,7 @@ h1 {
     padding-top: 30px;
     border-radius: 5px;
     font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 14px;
+    font-size: 15px;
     margin: 8px 0;
 }
 .ai-message pre code {
