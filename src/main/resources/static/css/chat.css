@@ -302,9 +302,17 @@ h1 {
     white-space: pre-wrap;
     overflow-wrap: break-word;
 }
+/* LLM이 실제 코드가 아니라 메뉴 경로("팀원 → 소속 팀장")나 용어를 백틱으로 감싸는
+   경우가 많아, 인라인 코드는 monospace(브라우저 기본값) 대신 본문과 같은 폰트를 쓰고
+   배경색만으로 구분한다. 진짜 코드 블록(pre code)은 위 .ai-message pre 규칙에서
+   별도로 monospace를 유지한다. */
 .ai-message code {
+    font-family: inherit;
     white-space: pre-wrap;
     overflow-wrap: break-word;
+    background-color: #e8e8e8;
+    padding: 1px 5px;
+    border-radius: 3px;
 }
 .code-copy-btn {
     position: absolute;
