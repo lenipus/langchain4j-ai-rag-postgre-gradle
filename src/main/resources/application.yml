@@ -51,7 +51,7 @@ langchain4j:
       repeat-penalty: 1.1
       frequency-penalty: 0.3
       presence-penalty: 0.0
-      timeout: 200s
+      timeout: 300s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:8192}
     # ChatGPT 연결
     openai:
