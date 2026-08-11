@@ -29,21 +29,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 채팅 모델(LLM)과의 연결을 전담하는 게이트웨이.
- *
- * <p>연결 설정(base-url/api-key/api-type/model-name/temperature/timeout/num-ctx/반복 억제
- * 페널티), 실제
- * {@link ChatModel}/{@link StreamingChatModel} 인스턴스 생성(기본 모델이든 사용자가 선택한
- * 다른 모델이든 이 클래스의 메서드 하나씩만 부르면 됨), Ollama 서버 상태 조회(설치된 모델
- * 목록, 사용 가능 여부, 모델별 컨텍스트 길이)까지 채팅 모델과 관련된 모든 요청 전송/응답
- * 수신을 이 클래스 하나가 담당한다. 다른 서비스(예: {@link ChatbotFactory})는 이 게이트웨이만
- * 호출해서 필요한 모델/정보를 받아 쓰고, 자기 나름의 연결 설정을 따로 갖지 않는다.</p>
- *
- * <p>예전엔 이 로직이 {@code EgovLangChain4jConfig}(기본 모델 빈 생성), {@code ChatbotFactory}
- * (사용자가 다른 모델을 선택했을 때의 동적 생성), {@code EgovOllamaModelServiceImpl}(서버 상태
- * 조회)로 3곳에 나뉘어 있었고, 그러다 보니 "기본 모델용 빈 생성 코드"와 "동적 모델 생성
- * 코드"가 사실상 같은 로직인데도 복사-붙여넣기 되어 있었다(예: 기본 모델은 num_ctx를 모델
- * 실제 한계로 깎는 로직을 안 타는데 동적 모델만 타는 불일치도 있었음). 이제는 기본 모델도
- * {@code getStreamingModel(defaultModelName)}과 동일한 경로를 타므로 그런 불일치가 없다.</p>
  */
 @Slf4j
 @Component
@@ -73,24 +58,6 @@ public class ChatModelGateway {
     @Value("${langchain4j.chat.ollama.num-ctx:0}")
     private Integer chatModelNumCtx;
 
-    /**
-     * temperature를 낮게(특히 0) 쓰면 그리디 디코딩이 돼서 반복 루프(같은 문단을 계속
-     * 되풀이하다 잘리는 현상)에 취약해진다. 이 페널티들은 반복 자체에 직접 벌점을 줘서
-     * temperature를 낮게 유지하면서도 반복을 억제한다. api-type에 따라 이름과 척도가 다르다:
-     * <ul>
-     *   <li>Ollama 네이티브(api-type=ollama): repeat-penalty (1.0=페널티 없음, 보통 1.1~1.3)</li>
-     *   <li>OpenAI 호환(api-type=openai) - 값 범위는 둘 다 0.0=페널티 없음, OpenAI 스펙상 -2.0~2.0:
-     *     <ul>
-     *       <li>frequency-penalty: 같은 토큰이 나온 "횟수"에 비례해 벌점이 커진다.
-     *           반복이 누적될수록 그 토큰을 또 고를 확률이 계속 낮아져, 지금 같은
-     *           반복 루프(같은 문단 되풀이)를 직접 억제한다.</li>
-     *       <li>presence-penalty: 그 토큰이 "한 번이라도" 나왔으면 횟수와 무관하게
-     *           고정 벌점을 준다. 반복 억제보다는 새로운 단어/주제를 더 쓰도록
-     *           유도하는 쪽이라, 반복 루프 억제엔 frequency-penalty보다 효과가 약하다.</li>
-     *     </ul>
-     *   </li>
-     * </ul>
-     */
     @Value("${langchain4j.chat.ollama.repeat-penalty:1.1}")
     private Double chatModelRepeatPenalty;
 
@@ -100,11 +67,6 @@ public class ChatModelGateway {
     @Value("${langchain4j.chat.ollama.presence-penalty:0.0}")
     private Double chatModelPresencePenalty;
 
-    /**
-     * ChatGPT(OpenAI 실제 API) 연결 설정. {@code langchain4j.chat.ollama.*}(remote LLM
-     * 서버)와는 완전히 별개 backend라 base-url을 안 주면 langchain4j가 api.openai.com/v1로
-     * 접속한다.
-     */
     @Value("${langchain4j.chat.openai.enabled:false}")
     private boolean openAiEnabled;
 
@@ -119,6 +81,24 @@ public class ChatModelGateway {
 
     @Value("${langchain4j.chat.openai.timeout:120s}")
     private Duration openAiTimeout;
+
+    @Value("${langchain4j.chat.openai.context-length:128000}")
+    private int openAiContextLength;
+
+    @Value("${langchain4j.chat.ollama.num-predict:0}")
+    private Integer chatModelNumPredict;
+
+    /** {@code langchain4j.chat.openai.*}(실제 ChatGPT)용 응답 길이 상한(OpenAI {@code max_tokens}). */
+    @Value("${langchain4j.chat.openai.max-tokens:0}")
+    private Integer openAiMaxTokens;
+
+    @Value("${chat.memory.context-reserve-tokens:12000}")
+    private int contextReserveTokens;
+
+    @Value("${chat.memory.fallback-context-tokens:8192}")
+    private int fallbackContextTokens;
+
+    private static final int MIN_HISTORY_TOKEN_BUDGET = 500;
 
     /** 모델 목록에서 ChatGPT 항목을 구분하는 접두사. 프론트는 이 값을 그대로 model 파라미터로 돌려보낸다. */
     private static final String OPENAI_MODEL_PREFIX = "chatgpt:";
@@ -175,24 +155,27 @@ public class ChatModelGateway {
     public StreamingChatModel getStreamingModel(String modelName) {
         if (isOpenAiModel(modelName)) {
             String actualModelName = modelName.substring(OPENAI_MODEL_PREFIX.length());
-            log.info("스트리밍 모델 생성 - backend: openai(ChatGPT), model: {}, temperature: {}, timeout: {}",
-                    actualModelName, openAiTemperature, openAiTimeout);
-            return OpenAiStreamingChatModel.builder()
+            log.info("스트리밍 모델 생성 - backend: openai(ChatGPT), model: {}, temperature: {}, timeout: {}, maxTokens: {}",
+                    actualModelName, openAiTemperature, openAiTimeout, openAiMaxTokens);
+            var chatGptBuilder = OpenAiStreamingChatModel.builder()
                     .apiKey(openAiApiKey)
                     .modelName(actualModelName)
                     .temperature(openAiTemperature)
                     .timeout(openAiTimeout)
                     .logRequests(true)
-                    .logResponses(true)
-                    .build();
+                    .logResponses(true);
+            if (openAiMaxTokens != null && openAiMaxTokens > 0) {
+                chatGptBuilder.maxTokens(openAiMaxTokens);
+            }
+            return chatGptBuilder.build();
         }
         String effectiveModelName = resolveModelName(modelName);
         if (isRemoteMode()) {
             log.info("스트리밍 모델 생성 - backend: openai 호환(remote), model: {}, temperature: {}, timeout: {}, "
-                            + "frequencyPenalty: {}, presencePenalty: {}",
+                            + "frequencyPenalty: {}, presencePenalty: {}, maxTokens: {}",
                     effectiveModelName, chatModelTemperature, chatModelTimeout,
-                    chatModelFrequencyPenalty, chatModelPresencePenalty);
-            return OpenAiStreamingChatModel.builder()
+                    chatModelFrequencyPenalty, chatModelPresencePenalty, chatModelNumPredict);
+            var remoteBuilder = OpenAiStreamingChatModel.builder()
                     .baseUrl(chatModelBaseUrl)
                     .apiKey(resolveApiKey(chatModelApiKey))
                     .modelName(effectiveModelName)
@@ -201,13 +184,17 @@ public class ChatModelGateway {
                     .frequencyPenalty(chatModelFrequencyPenalty)
                     .presencePenalty(chatModelPresencePenalty)
                     .logRequests(true)
-                    .logResponses(true)
-                    .build();
+                    .logResponses(true);
+            if (chatModelNumPredict != null && chatModelNumPredict > 0) {
+                remoteBuilder.maxTokens(chatModelNumPredict);
+            }
+            return remoteBuilder.build();
         }
         int numCtx = resolveNumCtx(effectiveModelName);
         log.info("스트리밍 모델 생성 - backend: ollama, model: {}, temperature: {}, timeout: {}, "
-                        + "repeatPenalty: {}, numCtx: {}",
-                effectiveModelName, chatModelTemperature, chatModelTimeout, chatModelRepeatPenalty, numCtx);
+                        + "repeatPenalty: {}, numCtx: {}, numPredict: {}",
+                effectiveModelName, chatModelTemperature, chatModelTimeout, chatModelRepeatPenalty, numCtx,
+                chatModelNumPredict);
         var builder = OllamaStreamingChatModel.builder()
                 .baseUrl(chatModelBaseUrl)
                 .modelName(effectiveModelName)
@@ -219,6 +206,9 @@ public class ChatModelGateway {
         if (numCtx > 0) {
             builder.numCtx(numCtx);
         }
+        if (chatModelNumPredict != null && chatModelNumPredict > 0) {
+            builder.numPredict(chatModelNumPredict);
+        }
         return builder.build();
     }
 
@@ -229,24 +219,27 @@ public class ChatModelGateway {
     public ChatModel getChatModel(String modelName) {
         if (isOpenAiModel(modelName)) {
             String actualModelName = modelName.substring(OPENAI_MODEL_PREFIX.length());
-            log.info("비스트리밍 모델 생성 - backend: openai(ChatGPT), model: {}, temperature: {}, timeout: {}",
-                    actualModelName, openAiTemperature, openAiTimeout);
-            return OpenAiChatModel.builder()
+            log.info("비스트리밍 모델 생성 - backend: openai(ChatGPT), model: {}, temperature: {}, timeout: {}, maxTokens: {}",
+                    actualModelName, openAiTemperature, openAiTimeout, openAiMaxTokens);
+            var chatGptBuilder = OpenAiChatModel.builder()
                     .apiKey(openAiApiKey)
                     .modelName(actualModelName)
                     .temperature(openAiTemperature)
                     .timeout(openAiTimeout)
                     .logRequests(true)
-                    .logResponses(true)
-                    .build();
+                    .logResponses(true);
+            if (openAiMaxTokens != null && openAiMaxTokens > 0) {
+                chatGptBuilder.maxTokens(openAiMaxTokens);
+            }
+            return chatGptBuilder.build();
         }
         String effectiveModelName = resolveModelName(modelName);
         if (isRemoteMode()) {
             log.info("비스트리밍 모델 생성 - backend: openai 호환(remote), model: {}, temperature: {}, timeout: {}, "
-                            + "frequencyPenalty: {}, presencePenalty: {}",
+                            + "frequencyPenalty: {}, presencePenalty: {}, maxTokens: {}",
                     effectiveModelName, chatModelTemperature, chatModelTimeout,
-                    chatModelFrequencyPenalty, chatModelPresencePenalty);
-            return OpenAiChatModel.builder()
+                    chatModelFrequencyPenalty, chatModelPresencePenalty, chatModelNumPredict);
+            var remoteBuilder = OpenAiChatModel.builder()
                     .baseUrl(chatModelBaseUrl)
                     .apiKey(resolveApiKey(chatModelApiKey))
                     .modelName(effectiveModelName)
@@ -255,13 +248,17 @@ public class ChatModelGateway {
                     .frequencyPenalty(chatModelFrequencyPenalty)
                     .presencePenalty(chatModelPresencePenalty)
                     .logRequests(true)
-                    .logResponses(true)
-                    .build();
+                    .logResponses(true);
+            if (chatModelNumPredict != null && chatModelNumPredict > 0) {
+                remoteBuilder.maxTokens(chatModelNumPredict);
+            }
+            return remoteBuilder.build();
         }
         int numCtx = resolveNumCtx(effectiveModelName);
         log.info("비스트리밍 모델 생성 - backend: ollama, model: {}, temperature: {}, timeout: {}, "
-                        + "repeatPenalty: {}, numCtx: {}",
-                effectiveModelName, chatModelTemperature, chatModelTimeout, chatModelRepeatPenalty, numCtx);
+                        + "repeatPenalty: {}, numCtx: {}, numPredict: {}",
+                effectiveModelName, chatModelTemperature, chatModelTimeout, chatModelRepeatPenalty, numCtx,
+                chatModelNumPredict);
         var builder = OllamaChatModel.builder()
                 .baseUrl(chatModelBaseUrl)
                 .modelName(effectiveModelName)
@@ -272,6 +269,9 @@ public class ChatModelGateway {
                 .logResponses(true);
         if (numCtx > 0) {
             builder.numCtx(numCtx);
+        }
+        if (chatModelNumPredict != null && chatModelNumPredict > 0) {
+            builder.numPredict(chatModelNumPredict);
         }
         return builder.build();
     }
@@ -297,6 +297,31 @@ public class ChatModelGateway {
             return Math.min(chatModelNumCtx, modelMaxContext);
         }
         return modelMaxContext;
+    }
+
+    /**
+     * 채팅 메모리가 LLM에 히스토리로 보낼 수 있는 토큰 예산. 모델의 실제 컨텍스트 길이에서
+     * 시스템 프롬프트/RAG 삽입 문서/응답 생성분을 위한 여유({@code contextReserveTokens})를
+     * 뺀 값이다.
+     *
+     * <ul>
+     *   <li>ChatGPT(실제 OpenAI API): 설정값({@code openAiContextLength}, 기본 128k)</li>
+     *   <li>Ollama 네이티브: {@link #resolveNumCtx}로 실제 요청될 num_ctx를 그대로 쓴다
+     *       (조회 실패 시 fallback)</li>
+     *   <li>원격(openai 호환) 서버: 모델 정보를 조회할 방법이 없어 항상 fallback</li>
+     * </ul>
+     */
+    public int resolveHistoryTokenBudget(String modelName) {
+        int contextLength;
+        if (isOpenAiModel(modelName)) {
+            contextLength = openAiContextLength;
+        } else if (!isRemoteMode()) {
+            int resolved = resolveNumCtx(resolveModelName(modelName));
+            contextLength = resolved > 0 ? resolved : fallbackContextTokens;
+        } else {
+            contextLength = fallbackContextTokens;
+        }
+        return Math.max(contextLength - contextReserveTokens, MIN_HISTORY_TOKEN_BUDGET);
     }
 
     /**

@@ -53,13 +53,15 @@ langchain4j:
       presence-penalty: 0.0
       timeout: 300s
       num-ctx: ${OLLAMA_CHAT_NUM_CTX:8192}
-    # ChatGPT 연결
+      num-predict: 4096
     openai:
       enabled: ${OPENAI_CHAT_ENABLED:false}
       api-key: ${OPENAI_CHAT_API_KEY:}
       model-name: ${OPENAI_CHAT_MODEL_NAME:}
       temperature: 1
       timeout: 200s
+      context-length: 128000
+      max-tokens: 4096
 
   embedding:
     ollama:
@@ -140,8 +142,10 @@ rag:
 # 채팅 메모리 설정
 chat:
   memory:
-    max-messages: 30
     table-name: chat_memory
+    context-reserve-tokens: 12000
+    fallback-context-tokens: 8192
+    max-history-turns: 10
   image-attachment:
     enabled: false
 

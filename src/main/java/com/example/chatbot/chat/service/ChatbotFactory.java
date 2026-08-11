@@ -323,7 +323,7 @@ public class ChatbotFactory {
 
         @Override
         public List<ChatMessage> getMessages(Object memoryId) {
-            return delegate.getMessages(memoryId);
+            return delegate.getMessages(memoryId, modelName);
         }
 
         @Override
