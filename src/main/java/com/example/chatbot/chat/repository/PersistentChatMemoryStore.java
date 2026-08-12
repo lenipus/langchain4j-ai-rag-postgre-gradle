@@ -1,6 +1,7 @@
 package com.example.chatbot.chat.repository;
 
 import com.example.chatbot.chat.entity.ChatMemoryEntity;
+import com.example.chatbot.chat.service.ChatModelGateway;
 import com.example.chatbot.sqlgen.service.SqlGenChatbot;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -9,6 +10,8 @@ import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.TokenCountEstimator;
+import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,12 +32,15 @@ import java.util.List;
 public class PersistentChatMemoryStore implements ChatMemoryStore {
 
     private final ChatMemoryRepository chatMemoryRepository;
+    private final ChatModelGateway chatModelGateway;
 
-    @Value("${chat.memory.max-messages:20}")
-    private int maxMessages = 20;
+    private static final TokenCountEstimator TOKEN_ESTIMATOR = new OpenAiTokenCountEstimator("gpt-4o");
+
+    @Value("${chat.memory.max-history-turns:15}")
+    private int maxHistoryTurns;
 
     /**
-     * 특정 세션의 모든 메시지 조회
+     * 특정 세션의 모든 메시지 조회 (모델을 모를 때 - fallback 토큰 예산 사용)
      *
      * @param memoryId 세션 ID
      * @return ChatMessage 리스트
@@ -42,6 +48,19 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     @Override
     @Transactional(readOnly = true)
     public List<ChatMessage> getMessages(Object memoryId) {
+        return getMessages(memoryId, null);
+    }
+
+    /**
+     * 특정 세션의 메시지를, 이번 턴에 실제로 쓰는 모델의 컨텍스트 길이에 맞춰 토큰
+     * 예산만큼 조회한다.
+     *
+     * @param memoryId  세션 ID
+     * @param modelName 이번 턴에 쓰는 모델명(토큰 예산 계산용, 모르면 null)
+     * @return ChatMessage 리스트
+     */
+    @Transactional(readOnly = true)
+    public List<ChatMessage> getMessages(Object memoryId, String modelName) {
         String sessionId = memoryId.toString();
         // log.debug("채팅 메모리 조회 - 세션: {}", sessionId);
 
@@ -57,35 +76,50 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         }
 
         // log.debug("채팅 메모리 조회 완료 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
-        return applyPairSafeWindow(messages, maxMessages);
+        int tokenBudget = chatModelGateway.resolveHistoryTokenBudget(modelName);
+        return applyPairSafeTokenWindow(messages, tokenBudget);
     }
 
     /**
-     * 최대 개수를 넘으면 오래된 쪽부터 잘라내되, 잘리는 시작점이 ASSISTANT(답변) 메시지면
-     * 그 앞의 USER(질문)까지 한 개 더 포함해서 질문부터 시작하게 한다 - 그래서 실제로는
-     * maxMessages보다 하나 더(질문+답변 쌍이 안 깨지도록) 남을 수 있다. 맨 앞 SYSTEM
-     * 메시지(있다면)는 이 창 계산과 무관하게 항상 유지한다.
+     * 최신 메시지부터 거꾸로 훑으며 토큰을 누적하다가, 다음 메시지를 더하면 예산을 넘기는
+     * 지점에서 멈춘다. 그 다음 {@code maxHistoryTurns}(질문+답변 쌍 수) 제한까지 같이 적용해,
+     * 토큰 예산이 남아도 그보다 오래된 턴은 자른다 - 둘 중 더 적게 남기는 쪽이 최종 적용된다.
+     * 잘리는 지점에 ASSISTANT(답변)만 남고 짝이 되는 USER(질문)가 밖으로 밀려났으면, 질문
+     * 없이 답변부터 시작하지 않도록 그 답변까지 통째로 제외한다(개수 기반 버전과 달리 예산을
+     * 넘겨가며 하나 더 포함할 수는 없으므로 반대로 최신 쪽에서 뺀다). 맨 앞 SYSTEM 메시지
+     * (있다면)는 이 계산과 무관하게 항상 유지한다.
      */
-    private List<ChatMessage> applyPairSafeWindow(List<ChatMessage> messages, int maxMessages) {
-        if (messages.size() <= maxMessages) {
+    private List<ChatMessage> applyPairSafeTokenWindow(List<ChatMessage> messages, int maxTokens) {
+        if (messages.isEmpty()) {
             return messages;
         }
 
-        int systemOffset = (!messages.isEmpty() && messages.get(0) instanceof SystemMessage) ? 1 : 0;
+        int systemOffset = messages.get(0) instanceof SystemMessage ? 1 : 0;
         List<ChatMessage> conversation = messages.subList(systemOffset, messages.size());
 
-        int conversationLimit = maxMessages - systemOffset;
-        if (conversation.size() <= conversationLimit) {
+        int tokenSum = 0;
+        int includeFrom = conversation.size();
+        for (int i = conversation.size() - 1; i >= 0; i--) {
+            int msgTokens = TOKEN_ESTIMATOR.estimateTokenCountInMessage(conversation.get(i));
+            if (tokenSum + msgTokens > maxTokens) {
+                break;
+            }
+            tokenSum += msgTokens;
+            includeFrom = i;
+        }
+
+        int turnLimitedStart = Math.max(0, conversation.size() - maxHistoryTurns * 2);
+        includeFrom = Math.max(includeFrom, turnLimitedStart);
+
+        while (includeFrom < conversation.size() && conversation.get(includeFrom) instanceof AiMessage) {
+            includeFrom++;
+        }
+
+        if (includeFrom == 0) {
             return messages;
         }
-
-        int cutFrom = conversation.size() - conversationLimit;
-        if (cutFrom > 0 && conversation.get(cutFrom) instanceof AiMessage) {
-            cutFrom--;
-        }
-
         List<ChatMessage> result = new ArrayList<>(messages.subList(0, systemOffset));
-        result.addAll(conversation.subList(cutFrom, conversation.size()));
+        result.addAll(conversation.subList(includeFrom, conversation.size()));
         return result;
     }
 
@@ -126,30 +160,64 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
 
         List<ChatMemoryEntity> existing = chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
 
+        ChatMessage incomingSystemMessage = null;
+        for (ChatMessage message : messages) {
+            if (message instanceof SystemMessage) {
+                incomingSystemMessage = message;
+                break;
+            }
+        }
+        ChatMemoryEntity existingSystemEntity = null;
+        List<ChatMemoryEntity> existingConversation = new ArrayList<>();
+        for (ChatMemoryEntity entity : existing) {
+            if ("SYSTEM".equals(entity.getMessageType())) {
+                existingSystemEntity = entity;
+            } else {
+                existingConversation.add(entity);
+            }
+        }
+        if (incomingSystemMessage != null) {
+            String newContent = ((SystemMessage) incomingSystemMessage).text();
+            if (existingSystemEntity == null) {
+                chatMemoryRepository.save(new ChatMemoryEntity(sessionId, "SYSTEM", newContent));
+            } else if (!newContent.equals(existingSystemEntity.getContent())) {
+                existingSystemEntity.setContent(newContent);
+                chatMemoryRepository.save(existingSystemEntity);
+            }
+        }
+
+        List<ChatMessage> conversationMessages = new ArrayList<>();
+        for (ChatMessage message : messages) {
+            if (!(message instanceof SystemMessage)) {
+                conversationMessages.add(message);
+            }
+        }
+
         int newStart;
-        if (existing.size() < messages.size()) {
-            newStart = existing.size();
+        if (existingConversation.size() < conversationMessages.size()) {
+            newStart = existingConversation.size();
         } else {
             List<ChatMessage> existingAsMessages = new ArrayList<>();
-            for (ChatMemoryEntity entity : existing) {
+            for (ChatMemoryEntity entity : existingConversation) {
                 ChatMessage converted = convertToLangChain4jMessage(entity);
                 if (converted != null) {
                     existingAsMessages.add(converted);
                 }
             }
-            newStart = applyPairSafeWindow(existingAsMessages, maxMessages).size();
+            int tokenBudget = chatModelGateway.resolveHistoryTokenBudget(model);
+            newStart = applyPairSafeTokenWindow(existingAsMessages, tokenBudget).size();
         }
 
-        boolean isRetryReplace = !existing.isEmpty()
-                && "USER".equals(existing.get(existing.size() - 1).getMessageType())
-                && newStart == messages.size() - 1
-                && messages.get(newStart) instanceof UserMessage;
+        boolean isRetryReplace = !existingConversation.isEmpty()
+                && "USER".equals(existingConversation.get(existingConversation.size() - 1).getMessageType())
+                && newStart == conversationMessages.size() - 1
+                && conversationMessages.get(newStart) instanceof UserMessage;
 
         if (isRetryReplace) {
-            chatMemoryRepository.delete(existing.get(existing.size() - 1));
-        } else if (!existing.isEmpty() && newStart < messages.size()
-                && "USER".equals(existing.get(existing.size() - 1).getMessageType())) {
-            ChatMemoryEntity lastExisting = existing.get(existing.size() - 1);
+            chatMemoryRepository.delete(existingConversation.get(existingConversation.size() - 1));
+        } else if (!existingConversation.isEmpty() && newStart < conversationMessages.size()
+                && "USER".equals(existingConversation.get(existingConversation.size() - 1).getMessageType())) {
+            ChatMemoryEntity lastExisting = existingConversation.get(existingConversation.size() - 1);
             String stripped = stripInjectedContext(lastExisting.getContent());
             if (!stripped.equals(lastExisting.getContent())) {
                 lastExisting.setContent(stripped);
@@ -157,7 +225,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
             }
         }
 
-        List<ChatMessage> newMessages = messages.subList(newStart, messages.size());
+        List<ChatMessage> newMessages = conversationMessages.subList(newStart, conversationMessages.size());
         int lastIndex = newMessages.size() - 1;
         for (int i = 0; i < newMessages.size(); i++) {
             boolean isLatest = (i == lastIndex);

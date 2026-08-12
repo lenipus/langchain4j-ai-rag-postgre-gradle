@@ -321,10 +321,12 @@ rag:
     threshold: 0.20               # 유사도 임계값
   top-k: 3                        # 검색 결과 개수
 
-# 채팅 메모리 설정 (DB는 세션 전체 대화를 영구 보존, 아래 값은 LLM에 보낼 히스토리에만 사용)
+# 채팅 메모리 설정 (DB는 세션 전체 대화를 영구 보존, 아래 값은 LLM에 보낼 히스토리 토큰 예산에만 사용)
 chat:
   memory:
-    max-messages: 20              # LLM에 보낼 최대 메시지 수
+    context-reserve-tokens: 12000   # 시스템 프롬프트/RAG 삽입 문서/응답 생성분 여유
+    fallback-context-tokens: 32768  # 모델 컨텍스트 길이를 알 수 없을 때 대신 쓰는 값 (context-reserve-tokens보다 커야 함)
+    max-history-turns: 15           # 토큰 예산이 남아도 최대 이 턴(질문+답변 쌍) 수까지만
 
 # PGVector 설정
 pgvector:

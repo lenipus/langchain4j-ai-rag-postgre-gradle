@@ -79,13 +79,7 @@ public class ChatbotFactory {
             DateCalculationTool dateCalculationTool,
             JdbcTemplate jdbcTemplate,
             @Value("${pgvector.table-name:document_embeddings}") String embeddingTableName) {
-        // 하이브리드 빈이 등록된 경우 우선 사용하고, 없으면 기존 dense 경로를 유지한다.
-        // 실제 EgovLoggingContentRetriever는 질의(턴)마다 turnId를 새로 발급해 createRagChatbot()에서
-        // 매번 새로 감싸 만든다 (아래 selectedRetriever는 그 delegate로만 쓰인다).
-        //
-        // EgovKeywordBoostContentRetriever는 이 선택 이후(하이브리드 융합/길이 필터 등 top-k
-        // 컷이 전부 끝난 뒤) 가장 바깥쪽에서 감싼다 - 그래야 강제로 끼워 넣는 문서가 fusion
-        // 단계에서 밀려날 일 없이 항상 살아남는다.
+
         ContentRetriever chosenRetriever = (hybridContentRetriever != null) ? hybridContentRetriever : denseContentRetriever;
         this.selectedRetriever = new EgovKeywordBoostContentRetriever(chosenRetriever, jdbcTemplate, embeddingTableName);
         this.contentAggregator = (contentAggregator != null) ? contentAggregator : new DefaultContentAggregator();
@@ -116,36 +110,17 @@ public class ChatbotFactory {
         StreamingChatModel streamingModel = chatModelGateway.getStreamingModel(modelName);
         String resolvedModelName = chatModelGateway.resolveModelName(modelName);
 
-        // 이 질의(턴) 하나를 위한 키. rag_retrieval_logs와 chat_memory 양쪽에 같은 값이
-        // 찍혀서, "이 질문/답변에 실제로 RAG가 뭘 검색해줬는지"를 정확히 조인해 추적할 수 있다.
         String turnId = UUID.randomUUID().toString();
 
-        log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}, 턴: {}, 질의 압축: {}",
-                chatModelGateway.resolveModelName(modelName), sessionId, turnId, queryCompressionEnabled);
+        log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}, 턴: {}, 질의 압축: {}", chatModelGateway.resolveModelName(modelName), sessionId, turnId, queryCompressionEnabled);
 
-        // 질의 압축이 켜져 있으면 검색엔 압축된 질의가 쓰이므로, 사용자가 실제로 입력한
-        // 원본 질의는 압축 단계(queryTransformer)에서 이 홀더에 채워 넣고
-        // EgovLoggingContentRetriever가 감사 로그에 같이 남길 때 읽어간다.
         AtomicReference<String> originalQueryTextHolder = new AtomicReference<>();
 
         ContentRetriever loggingRetriever = new EgovLoggingContentRetriever(
                 selectedRetriever, ragRetrievalLogRepository, sessionId, turnId,
                 originalQueryTextHolder, progressReporter);
 
-        AiServices<RagChatbot> builder = AiServices.builder(RagChatbot.class)
-                .streamingChatModel(streamingModel)
-                .systemMessageProvider(memoryId -> RagChatbot.RAG_SYSTEM_PROMPT + "\n\n" + currentDateContext())
-                .tools(dateCalculationTool)
-                .chatMemory(createChatMemory(sessionId, turnId, resolvedModelName));
-
-        // 동의어 정규화(SynonymQueryNormalizer)는 질의 압축 여부와 무관하게 항상 거쳐야
-        // 검색 텍스트에 반영되므로, 압축이 꺼져있어도 QueryTransformer를 그대로 둔다
-        // (이전엔 이 분기에서 contentRetriever만 넘겨 QueryTransformer 자체가 없었음).
-        QueryTransformer baseTransformer = queryCompressionEnabled
-                // 후속 질문(대명사·생략형)이 이전 대화를 반영 못 한 채 그대로 검색되는 문제를
-                // 완화하기 위해, 검색 전에 (이전 대화 + 현재 질문)을 독립형 질문으로 압축한다.
-                ? new CompressingQueryTransformer(chatModelGateway.getChatModel(modelName))
-                : query -> List.of(query);
+        QueryTransformer baseTransformer = queryCompressionEnabled ? new CompressingQueryTransformer(chatModelGateway.getChatModel(modelName)) : query -> List.of(query);
         ContentAggregator progressAggregator = queryToContents -> {
             progressReporter.accept(rerankingEnabled
                     ? RagProcessingStage.RERANKING
@@ -159,7 +134,13 @@ public class ChatbotFactory {
                 .contentRetriever(loggingRetriever)
                 .contentAggregator(progressAggregator)
                 .build();
-        builder.retrievalAugmentor(retrievalAugmentor);
+
+        AiServices<RagChatbot> builder = AiServices.builder(RagChatbot.class)
+                .streamingChatModel(streamingModel)
+                .systemMessageProvider(memoryId -> RagChatbot.RAG_SYSTEM_PROMPT + "\n\n" + currentDateContext())
+                .tools(dateCalculationTool)
+                .chatMemory(createChatMemory(sessionId, turnId, resolvedModelName))
+                .retrievalAugmentor(retrievalAugmentor);
 
         return builder.build();
     }
@@ -218,14 +199,6 @@ public class ChatbotFactory {
 
     private static final String[] KOREAN_DAY_ABBREVIATIONS = {"월", "화", "수", "목", "금", "토", "일"};
 
-    /**
-     * LLM은 실행 시점의 실제 날짜를 모르므로("올해"가 몇 년인지, "다음 주"가 언제인지 등을
-     * 스스로 계산 못 함), 시스템 메시지에 매 요청마다 오늘 날짜/요일을 넣어준다.
-     * {@code @SystemMessage} 정적 어노테이션 대신 systemMessageProvider를 쓰는 이유도
-     * 이 값을 요청 시점마다 새로 계산해서 넣기 위해서다(정적 어노테이션은 컴파일 타임
-     * 상수만 허용해 매번 다른 날짜를 넣을 수 없음).
-     */
-    // 테스트에서 날짜를 고정해 검증할 수 있도록 package-private로 연다.
     static String currentDateContext(LocalDate date) {
         return "오늘은 " + date.format(CURRENT_DATE_FORMATTER) + "입니다. "
                 + "요일이나 기간을 계산할 때는 이 날짜를 기준으로 날짜 차이를 정확히 센 다음 "
@@ -273,13 +246,6 @@ public class ChatbotFactory {
                 .build();
     }
 
-    /**
-     * MessageWindowChatMemory 자체의 창 크기는 사실상 무제한으로 크게 잡아둔다. 실제
-     * chat.memory.max-messages 제한은 PersistentChatMemoryStore.getMessages()가 질문+답변
-     * 짝이 안 깨지도록 직접 처리한다 - langchain4j 기본 ensureCapacity()는 인덱스 기준으로
-     * 하나씩만 잘라내서, 짝의 중간이 잘리면 새로고침 시 히스토리가 "답변"부터 시작하는
-     * 문제가 있었다.
-     */
     private static final int CHAT_MEMORY_WINDOW_UNLIMITED = 100_000;
 
     /**
@@ -323,7 +289,7 @@ public class ChatbotFactory {
 
         @Override
         public List<ChatMessage> getMessages(Object memoryId) {
-            return delegate.getMessages(memoryId);
+            return delegate.getMessages(memoryId, modelName);
         }
 
         @Override

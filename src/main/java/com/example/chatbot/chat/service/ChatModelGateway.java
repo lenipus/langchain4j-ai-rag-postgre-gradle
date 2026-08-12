@@ -73,24 +73,6 @@ public class ChatModelGateway {
     @Value("${langchain4j.chat.ollama.num-ctx:0}")
     private Integer chatModelNumCtx;
 
-    /**
-     * temperature를 낮게(특히 0) 쓰면 그리디 디코딩이 돼서 반복 루프(같은 문단을 계속
-     * 되풀이하다 잘리는 현상)에 취약해진다. 이 페널티들은 반복 자체에 직접 벌점을 줘서
-     * temperature를 낮게 유지하면서도 반복을 억제한다. api-type에 따라 이름과 척도가 다르다:
-     * <ul>
-     *   <li>Ollama 네이티브(api-type=ollama): repeat-penalty (1.0=페널티 없음, 보통 1.1~1.3)</li>
-     *   <li>OpenAI 호환(api-type=openai) - 값 범위는 둘 다 0.0=페널티 없음, OpenAI 스펙상 -2.0~2.0:
-     *     <ul>
-     *       <li>frequency-penalty: 같은 토큰이 나온 "횟수"에 비례해 벌점이 커진다.
-     *           반복이 누적될수록 그 토큰을 또 고를 확률이 계속 낮아져, 지금 같은
-     *           반복 루프(같은 문단 되풀이)를 직접 억제한다.</li>
-     *       <li>presence-penalty: 그 토큰이 "한 번이라도" 나왔으면 횟수와 무관하게
-     *           고정 벌점을 준다. 반복 억제보다는 새로운 단어/주제를 더 쓰도록
-     *           유도하는 쪽이라, 반복 루프 억제엔 frequency-penalty보다 효과가 약하다.</li>
-     *     </ul>
-     *   </li>
-     * </ul>
-     */
     @Value("${langchain4j.chat.ollama.repeat-penalty:1.1}")
     private Double chatModelRepeatPenalty;
 
@@ -100,11 +82,6 @@ public class ChatModelGateway {
     @Value("${langchain4j.chat.ollama.presence-penalty:0.0}")
     private Double chatModelPresencePenalty;
 
-    /**
-     * ChatGPT(OpenAI 실제 API) 연결 설정. {@code langchain4j.chat.ollama.*}(remote LLM
-     * 서버)와는 완전히 별개 backend라 base-url을 안 주면 langchain4j가 api.openai.com/v1로
-     * 접속한다.
-     */
     @Value("${langchain4j.chat.openai.enabled:false}")
     private boolean openAiEnabled;
 
@@ -119,6 +96,17 @@ public class ChatModelGateway {
 
     @Value("${langchain4j.chat.openai.timeout:120s}")
     private Duration openAiTimeout;
+
+    @Value("${langchain4j.chat.openai.context-length:128000}")
+    private int openAiContextLength;
+
+    @Value("${chat.memory.context-reserve-tokens:12000}")
+    private int contextReserveTokens;
+
+    @Value("${chat.memory.fallback-context-tokens:32768}")
+    private int fallbackContextTokens;
+
+    private static final int MIN_HISTORY_TOKEN_BUDGET = 500;
 
     /** 모델 목록에서 ChatGPT 항목을 구분하는 접두사. 프론트는 이 값을 그대로 model 파라미터로 돌려보낸다. */
     private static final String OPENAI_MODEL_PREFIX = "chatgpt:";
@@ -299,6 +287,19 @@ public class ChatModelGateway {
         return modelMaxContext;
     }
 
+    public int resolveHistoryTokenBudget(String modelName) {
+        int contextLength;
+        if (isOpenAiModel(modelName)) {
+            contextLength = openAiContextLength;
+        } else if (!isRemoteMode()) {
+            int resolved = resolveNumCtx(resolveModelName(modelName));
+            contextLength = resolved > 0 ? resolved : fallbackContextTokens;
+        } else {
+            contextLength = fallbackContextTokens;
+        }
+        return Math.max(contextLength - contextReserveTokens, MIN_HISTORY_TOKEN_BUDGET);
+    }
+
     /**
      * {@code /api/show}는 Ollama 네이티브 API 전용이라 원격(openai 호환) 모드에서는
      * 시도하지 않고 바로 empty를 반환한다. {@code model_info} 안의 키 이름은 아키텍처마다
@@ -366,14 +367,6 @@ public class ChatModelGateway {
 
     /**
      * 설치된 Ollama 모델 목록 조회 (임베딩 전용 모델 제외)
-     *
-     * <p>{@code ollama --version}(가용성 체크)은 데몬 없이도 성공하지만 {@code ollama list}는
-     * 백그라운드 데몬이 응답해야 하므로, 데몬이 막 기동된 직후처럼 데몬 응답이 늦는 시점에는
-     * 가용은 true이면서 목록만 비어 오는 경우가 있다. 원격(openai 호환) 모드의 HTTP 호출도
-     * 마찬가지로 타임아웃/일시적 오류가 나면 빈 목록으로 수렴하므로 같은 재시도로 흡수된다
-     * (참고: {@link #getRemoteModels()}는 예외를 내부에서 잡아 빈 목록을 반환함).
-     * 빈 목록이면 점점 늘어나는 대기 시간을 두고 최대 {@value #MAX_TRANSIENT_FAILURE_RETRIES}번
-     * 재시도한다.</p>
      *
      * @return 모델명 리스트
      */

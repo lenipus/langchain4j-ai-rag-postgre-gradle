@@ -60,6 +60,7 @@ langchain4j:
       model-name: ${OPENAI_CHAT_MODEL_NAME:}
       temperature: 1
       timeout: 200s
+      context-length: 128000
 
   embedding:
     ollama:
@@ -140,8 +141,10 @@ rag:
 # 채팅 메모리 설정
 chat:
   memory:
-    max-messages: 20
     table-name: chat_memory
+    context-reserve-tokens: 12000
+    fallback-context-tokens: ${OLLAMA_CHAT_NUM_CTX:8192}
+    max-history-turns: 15
   image-attachment:
     enabled: false
 
