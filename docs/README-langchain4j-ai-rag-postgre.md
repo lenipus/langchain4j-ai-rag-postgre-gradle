@@ -321,10 +321,10 @@ rag:
     threshold: 0.20               # 유사도 임계값
   top-k: 3                        # 검색 결과 개수
 
-# 채팅 메모리 설정
+# 채팅 메모리 설정 (DB는 세션 전체 대화를 영구 보존, 아래 값은 LLM에 보낼 히스토리에만 사용)
 chat:
   memory:
-    max-messages: 20              # 최대 메시지 수
+    max-messages: 20              # LLM에 보낼 최대 메시지 수
 
 # PGVector 설정
 pgvector:

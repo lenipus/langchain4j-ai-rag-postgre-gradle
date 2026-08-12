@@ -30,14 +30,6 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
 
     private final ChatMemoryRepository chatMemoryRepository;
 
-    /**
-     * 세션당 유지할 최대 메시지 수(대화 기록 + 시스템 메시지). {@code MessageWindowChatMemory}
-     * 자체의 창(window) 크기는 {@code ChatbotFactory}에서 사실상 무제한으로 크게 잡아두고,
-     * 실제 개수 제한은 여기서 짝(질문+답변) 단위로 직접 처리한다 - langchain4j의 기본
-     * ensureCapacity()는 인덱스 기준으로 한 개씩만 잘라내서, 잘리는 지점이 짝의 중간에
-     * 걸리면 새로고침 후 히스토리가 "답변"부터 시작하는(그 짝의 질문은 이미 삭제된) 문제가
-     * 있었다.
-     */
     @Value("${chat.memory.max-messages:20}")
     private int maxMessages = 20;
 
@@ -133,33 +125,43 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         // log.debug("채팅 메모리 업데이트 - 세션: {}, 메시지 수: {}", sessionId, messages.size());
 
         List<ChatMemoryEntity> existing = chatMemoryRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
-        int existingCount = existing.size();
 
-        // "중지" 직후 재질문, 또는 응답 없이 실패한 시도(예: 503) 후 재시도처럼, 직전에
-        // 저장된 마지막 메시지도 USER인데 이번에도 새 USER 메시지가 그 뒤에 add()된
-        // 경우 - 그대로 두면 실패한 질문이 재시도 때마다 하나씩 쌓인다. 이때는 추가가
-        // 아니라 마지막 기존 USER 행을 이번 메시지로 교체한다.
-        if (existingCount > 0 && messages.size() == existingCount + 1
-                && "USER".equals(existing.get(existingCount - 1).getMessageType())
-                && messages.get(existingCount) instanceof UserMessage) {
-            ChatMessage newUserMessage = messages.get(existingCount);
-            List<ChatMessage> replaced = new ArrayList<>(messages.subList(0, existingCount - 1));
-            replaced.add(newUserMessage);
-            messages = replaced;
-            existingCount--;
+        int newStart;
+        if (existing.size() < messages.size()) {
+            newStart = existing.size();
+        } else {
+            List<ChatMessage> existingAsMessages = new ArrayList<>();
+            for (ChatMemoryEntity entity : existing) {
+                ChatMessage converted = convertToLangChain4jMessage(entity);
+                if (converted != null) {
+                    existingAsMessages.add(converted);
+                }
+            }
+            newStart = applyPairSafeWindow(existingAsMessages, maxMessages).size();
         }
 
-        // 기존 메시지 삭제
-        chatMemoryRepository.deleteBySessionId(sessionId);
+        boolean isRetryReplace = !existing.isEmpty()
+                && "USER".equals(existing.get(existing.size() - 1).getMessageType())
+                && newStart == messages.size() - 1
+                && messages.get(newStart) instanceof UserMessage;
 
-        // 새 메시지 저장
-        int lastIndex = messages.size() - 1;
-        for (int i = 0; i < messages.size(); i++) {
+        if (isRetryReplace) {
+            chatMemoryRepository.delete(existing.get(existing.size() - 1));
+        } else if (!existing.isEmpty() && newStart < messages.size()
+                && "USER".equals(existing.get(existing.size() - 1).getMessageType())) {
+            ChatMemoryEntity lastExisting = existing.get(existing.size() - 1);
+            String stripped = stripInjectedContext(lastExisting.getContent());
+            if (!stripped.equals(lastExisting.getContent())) {
+                lastExisting.setContent(stripped);
+                chatMemoryRepository.save(lastExisting);
+            }
+        }
+
+        List<ChatMessage> newMessages = messages.subList(newStart, messages.size());
+        int lastIndex = newMessages.size() - 1;
+        for (int i = 0; i < newMessages.size(); i++) {
             boolean isLatest = (i == lastIndex);
-            // 이미 있던 메시지는 예전 turn_id/model을 이어받고, 이번에 새로 생긴 메시지만 이번 값을 찍는다.
-            String effectiveTurnId = (i < existingCount) ? existing.get(i).getTurnId() : turnId;
-            String effectiveModel = (i < existingCount) ? existing.get(i).getModel() : model;
-            ChatMemoryEntity entity = convertToEntity(sessionId, messages.get(i), isLatest, effectiveTurnId, effectiveModel);
+            ChatMemoryEntity entity = convertToEntity(sessionId, newMessages.get(i), isLatest, turnId, model);
             if (entity != null) {
                 chatMemoryRepository.save(entity);
             }
