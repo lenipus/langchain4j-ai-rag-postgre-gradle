@@ -12,6 +12,7 @@ import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 import dev.langchain4j.rag.RetrievalAugmentor;
+import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.aggregator.ContentAggregator;
 import dev.langchain4j.rag.content.aggregator.DefaultContentAggregator;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
@@ -115,17 +116,12 @@ public class ChatbotFactory {
         log.info("RAG 챗봇 생성 - 모델: {}, 세션: {}, 턴: {}, 질의 압축: {}", chatModelGateway.resolveModelName(modelName), sessionId, turnId, queryCompressionEnabled);
 
         AtomicReference<String> originalQueryTextHolder = new AtomicReference<>();
-
-        ContentRetriever loggingRetriever = new EgovLoggingContentRetriever(
-                selectedRetriever, ragRetrievalLogRepository, sessionId, turnId,
-                originalQueryTextHolder, progressReporter);
+        ContentRetriever loggingRetriever = new EgovLoggingContentRetriever(selectedRetriever, ragRetrievalLogRepository, sessionId, turnId, originalQueryTextHolder, progressReporter);
 
         QueryTransformer baseTransformer = queryCompressionEnabled ? new CompressingQueryTransformer(chatModelGateway.getChatModel(modelName)) : query -> List.of(query);
         ContentAggregator progressAggregator = queryToContents -> {
-            progressReporter.accept(rerankingEnabled
-                    ? RagProcessingStage.RERANKING
-                    : RagProcessingStage.ORGANIZING_RESULTS);
-            List<dev.langchain4j.rag.content.Content> aggregated = contentAggregator.aggregate(queryToContents);
+            progressReporter.accept(rerankingEnabled ? RagProcessingStage.RERANKING : RagProcessingStage.ORGANIZING_RESULTS);
+            List<Content> aggregated = contentAggregator.aggregate(queryToContents);
             progressReporter.accept(RagProcessingStage.GENERATING_ANSWER);
             return aggregated;
         };

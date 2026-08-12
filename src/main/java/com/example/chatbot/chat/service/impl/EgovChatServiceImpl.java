@@ -65,14 +65,13 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         String sessionId = SessionContext.getCurrentSessionId();
         log.info("RAG 스트리밍 질의 시작 - 세션: {}, 모델: {}, 쿼리: {}", sessionId, model, query);
 
-        // 질의 압축과 검색은 ragChatbot.streamChat()을 호출하는 동안 동기적으로 실행될 수 있다.
-        // Flux.create 안에서 실행해야 그 작업 전에 보낸 상태 이벤트도 이미 연결된 SSE 구독자에게
-        // 즉시 전달되며, 답변 토큰과 동일한 요청 생명주기를 공유할 수 있다.
         return Flux.<StreamTokenDto>create(sink -> {
             long startTime = System.currentTimeMillis();
+
             AtomicBoolean firstChunkReceived = new AtomicBoolean(false);
             AtomicLong answerLength = new AtomicLong(0);
             AtomicReference<RagProcessingStage> currentStage = new AtomicReference<>();
+
             Consumer<RagProcessingStage> progressReporter = stage -> {
                 RagProcessingStage previous = currentStage.getAndSet(stage);
                 if (previous != stage && !sink.isCancelled()) {
@@ -88,24 +87,19 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
 
                 Flux<String> answerStream = withMemoryConflictRetry(() -> {
                     RagChatbot ragChatbot = chatbotFactory.createRagChatbot(model, sessionId, progressReporter);
-                    Flux<String> stream = image != null
-                            ? ragChatbot.streamChat(query, image)
-                            : ragChatbot.streamChat(query);
+                    Flux<String> stream = image != null ? ragChatbot.streamChat(query, image) : ragChatbot.streamChat(query);
                     return stream
                             .doOnNext(chunk -> answerLength.addAndGet(chunk.length()))
-                            .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}",
-                                    sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
+                            .doOnComplete(() -> log.info("RAG 스트리밍 완료 - 세션: {}, 총 소요: {}ms, 답변 길이: {}", sessionId, System.currentTimeMillis() - startTime, answerLength.get()))
                             .doOnError(e -> log.error("RAG 스트리밍 오류 - 세션: {}", sessionId, e))
                             .transform(s -> applyRetryAndErrorHandling(s, "RAG", sessionId));
                 }, sessionId);
 
                 var subscription = answerStream.subscribe(
                         chunk -> {
-                            if (firstChunkReceived.compareAndSet(false, true)
-                                    && !chunk.startsWith("\n[오류: ")) {
+                            if (firstChunkReceived.compareAndSet(false, true) && !chunk.startsWith("\n[오류: ")) {
                                 progressReporter.accept(RagProcessingStage.RECEIVING_ANSWER);
-                                log.info("RAG 답변 수신 시작 - 세션: {}, 소요: {}ms",
-                                        sessionId, System.currentTimeMillis() - startTime);
+                                log.info("RAG 답변 수신 시작 - 세션: {}, 소요: {}ms", sessionId, System.currentTimeMillis() - startTime);
                             }
                             sink.next(StreamTokenDto.token(chunk));
                         },
@@ -122,9 +116,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
                 sink.next(StreamTokenDto.token("\n[오류: " + friendlyErrorMessage(e) + "]"));
                 sink.complete();
             }
-        // 질의 압축/임베딩/검색은 동기·블로킹 작업이다. 생산 작업을 boundedElastic으로 옮기고
-        // SSE 신호 전달은 별도 worker에서 처리해야, 한 단계가 오래 걸리는 동안에도 앞서 보낸
-        // 상태 이벤트가 브라우저까지 즉시 flush된다.
         }).subscribeOn(Schedulers.boundedElastic())
                 .publishOn(Schedulers.parallel());
     }
@@ -174,10 +165,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
 
     /**
      * 세션별 SQL 생성 스트리밍 응답 생성
-     * - 사용자가 선택한 테이블의 스키마 텍스트를 사용자 메시지 뒤에 붙여(RAG의 문서 주입과
-     *   같은 패턴) SqlGenChatbot에 전달한다.
-     * - ChatMemory를 세션과 공유하므로, 이전 턴에서 생성한 SQL을 이어서 수정하는 후속
-     *   요청("방금 쿼리에 email 컬럼도 추가해줘")도 이전 대화를 참고해 처리된다.
      */
     @Override
     public Flux<String> streamSqlGenResponse(String query, String model, Long connectionId, List<String> tableNames) {
@@ -242,15 +229,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         }
     }
 
-    /**
-     * 응답을 "중지"한 직후 바로 새 질문을 보내면, 방금 중단된 스트림이 서버 쪽에서 아직
-     * 마무리 중이던 채팅 메모리 저장(PersistentChatMemoryStore.updateMessages - 세션 전체
-     * 메시지를 delete 후 재삽입)과 새 질문의 메모리 저장이 같은 세션 행을 동시에 건드려
-     * ObjectOptimisticLockingFailureException이 날 수 있다(이전 스트림은 클라이언트가
-     * EventSource.close()로 연결만 끊었을 뿐, 서버의 LLM 호출/메모리 저장 자체는 별도
-     * 스레드에서 계속 진행 중이었기 때문). 대부분 수백ms 안에 끝나는 일시적 경합이므로,
-     * 채팅 자체를 실패로 보여주는 대신 짧게 재시도한다.
-     */
     private Flux<String> withMemoryConflictRetry(Supplier<Flux<String>> streamSupplier, String sessionId) {
         int attempt = 0;
         while (true) {
@@ -272,13 +250,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         }
     }
 
-    /**
-     * 예외를 사용자에게 보여줄 친화적인 한국어 메시지로 변환한다. 원인 체인을 훑어 Ollama의
-     * "컨텍스트 크기 초과"(exceed_context_size_error) 오류처럼 구체적인 원인을 알 수 있는
-     * 경우 실제 토큰 수까지 포함한 메시지를 만들고, 그 외에는 기존 타임아웃/연결 오류
-     * 메시지로, 마지막엔 원본 메시지를 그대로 붙인 범용 메시지로 폴백한다.
-     */
-    // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
     private String friendlyErrorMessage(Throwable e) {
         if (e instanceof ObjectOptimisticLockingFailureException) {
             return "죄송합니다. 방금 응답을 중지한 직후라 이전 요청 정리와 충돌했습니다. 잠시 후 다시 시도해주세요.";
@@ -301,11 +272,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         return "죄송합니다. 응답을 생성하는 중에 오류가 발생했습니다: " + errorMessage;
     }
 
-    /**
-     * 원인 체인(getCause 연쇄)을 훑어 Ollama의 컨텍스트 크기 초과 오류를 찾는다. 찾으면
-     * 오류 본문에 실려오는 n_prompt_tokens/n_ctx 값으로 구체적인 메시지를 만들고, 그 표시가
-     * 없으면 null을 반환해 다른 폴백 메시지로 넘어가게 한다.
-     */
     private String findContextSizeExceededMessage(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
             String msg = t.getMessage();
@@ -325,11 +291,6 @@ public class EgovChatServiceImpl extends EgovAbstractServiceImpl implements Egov
         return null;
     }
 
-    /**
-     * 스트리밍 중 오류를 친화적 메시지로 변환한다(자동 재시도는 하지 않음).
-     *
-     */
-    // 테스트에서 직접 검증할 수 있도록 package-private로 연다.
     private Flux<String> applyRetryAndErrorHandling(Flux<String> stream, String serviceType, String sessionId) {
         return stream
                 .onErrorResume(e -> {
