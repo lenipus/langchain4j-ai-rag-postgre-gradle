@@ -572,6 +572,14 @@
                 return;
             }
 
+            // 삭제하려는 세션이 지금 스트리밍 중이면 먼저 정리한다 - 안 그러면 대기
+            // 인터벌(thinkingIntervalId)과 EventSource가 안 끊긴 채 남아있다가, 다음에
+            // 다른 세션에서 새 질문을 보낼 때 전역 activeStreamController가 재사용되면서
+            // 새 질문의 경과시간 표시에 옛 인터벌 값이 섞여 들어간다.
+            if (activeStreamController && activeStreamController.sessionId === sessionId) {
+                activeStreamController.stop();
+            }
+
             fetch(`/api/chat/sessions/${sessionId}`, {
                 method: 'DELETE'
             })
